@@ -17,7 +17,7 @@ exports.sendPayout = async ({ amount }) => {
         beneId: "Test", // 🔥 SAME EXACT ID as Cashfree dashboard
         amount: Number(amount),
         transferId: transferId,
-        transferMode: "upi",
+        transferMode: "banktransfer",
         remarks: "Withdraw payout"
       },
       {
