@@ -9,6 +9,10 @@ const { sendPayout } = require("../services/payoutService");
 
 const createWithdrawal = async (req, res) => {
   try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: "User not logged in" });
+    }
+
     const { amount, upiId, accountNumber, ifsc, name } = req.body;
 
     const amountNum = Number(amount);
@@ -45,9 +49,7 @@ const createWithdrawal = async (req, res) => {
         user: req.user._id,
         balance: { $gte: amountNum },
       },
-      {
-        $inc: { balance: -amountNum },
-      },
+      { $inc: { balance: -amountNum } },
       { new: true }
     );
 
@@ -104,7 +106,7 @@ const getAllWithdrawals = async (req, res) => {
 };
 
 /* ==============================
-   ADMIN PROCESS WITHDRAWAL (FINAL FIX)
+   ADMIN PROCESS WITHDRAWAL
 ============================== */
 
 const processWithdrawal = async (req, res) => {
@@ -119,10 +121,6 @@ const processWithdrawal = async (req, res) => {
 
     if (!withdrawal) {
       return res.status(404).json({ message: "Withdrawal not found" });
-    }
-
-    if (!withdrawal.user) {
-      return res.status(400).json({ message: "User missing in withdrawal" });
     }
 
     if (withdrawal.status !== "pending") {
@@ -149,20 +147,22 @@ const processWithdrawal = async (req, res) => {
       } catch (payoutErr) {
         console.error("❌ Payout failed:", payoutErr.message);
 
-        const wallet = await Wallet.findOne({ user: withdrawal.user });
+        if (withdrawal.user) {
+          const wallet = await Wallet.findOne({ user: withdrawal.user });
 
-        if (wallet) {
-          wallet.balance += withdrawal.amount;
+          if (wallet) {
+            wallet.balance += withdrawal.amount;
 
-          wallet.transactions.push({
-            amount: withdrawal.amount,
-            type: "credit",
-            source: "withdraw",
-            description: "Payout failed (refund)",
-            refId: withdrawal._id,
-          });
+            wallet.transactions.push({
+              amount: withdrawal.amount,
+              type: "credit",
+              source: "withdraw",
+              description: "Payout failed (refund)",
+              refId: withdrawal._id,
+            });
 
-          await wallet.save();
+            await wallet.save();
+          }
         }
 
         return res.status(500).json({
@@ -172,7 +172,7 @@ const processWithdrawal = async (req, res) => {
     }
 
     /* ======================
-       UPDATE (NO SAVE ❌)
+       UPDATE
     ====================== */
 
     await Withdrawal.updateOne(
@@ -188,7 +188,7 @@ const processWithdrawal = async (req, res) => {
        REJECT REFUND
     ====================== */
 
-    if (status === "rejected") {
+    if (status === "rejected" && withdrawal.user) {
       const wallet = await Wallet.findOne({ user: withdrawal.user });
 
       if (wallet) {
