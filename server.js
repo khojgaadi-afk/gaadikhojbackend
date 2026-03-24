@@ -8,10 +8,12 @@ const connectDB = require("./src/config/db");
 // ✅ FIXED PATH
 const earnRoutes = require("./src/routes/earnRoutes");
 const referralRoutes = require("./src/routes/referralRoutes");
+const withdrawalRoutes = require("./src/routes/withdrawalRoutes");
 
 // Routes
 app.use("/api/referral", referralRoutes);
 app.use("/api/earn", earnRoutes);
+app.use("/api/withdrawals", withdrawalRoutes);
 
 // PORT
 const PORT = process.env.PORT || 5000;
