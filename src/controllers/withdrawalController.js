@@ -104,7 +104,7 @@ const getAllWithdrawals = async (req, res) => {
 };
 
 /* ==============================
-   ADMIN PROCESS WITHDRAWAL (FIXED)
+   ADMIN PROCESS WITHDRAWAL (FINAL FIX)
 ============================== */
 
 const processWithdrawal = async (req, res) => {
@@ -115,18 +115,21 @@ const processWithdrawal = async (req, res) => {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    const withdrawal = await Withdrawal.findById(req.params.id).populate("user");
+    const withdrawal = await Withdrawal.findById(req.params.id);
 
     if (!withdrawal) {
       return res.status(404).json({ message: "Withdrawal not found" });
+    }
+
+    if (!withdrawal.user) {
+      return res.status(400).json({ message: "User missing in withdrawal" });
     }
 
     if (withdrawal.status !== "pending") {
       return res.status(400).json({ message: "Already processed" });
     }
 
-    withdrawal.status = status;
-    withdrawal.adminNote = adminNote;
+    let transferId = null;
 
     /* ======================
        PAYOUT
@@ -136,12 +139,9 @@ const processWithdrawal = async (req, res) => {
       try {
         const payout = await sendPayout({
           amount: withdrawal.amount,
-          upiId: withdrawal.upiId,
-          name: withdrawal.name || "User",
-          phone: "9999999999",
         });
 
-        withdrawal.cashfreeTransferId =
+        transferId =
           payout?.transferId ||
           payout?.data?.transferId ||
           null;
@@ -171,7 +171,18 @@ const processWithdrawal = async (req, res) => {
       }
     }
 
-    await withdrawal.save();
+    /* ======================
+       UPDATE (NO SAVE ❌)
+    ====================== */
+
+    await Withdrawal.updateOne(
+      { _id: withdrawal._id },
+      {
+        status,
+        adminNote,
+        cashfreeTransferId: transferId,
+      }
+    );
 
     /* ======================
        REJECT REFUND
@@ -196,14 +207,12 @@ const processWithdrawal = async (req, res) => {
     }
 
     /* ======================
-       SAFE AUDIT LOG
+       AUDIT LOG
     ====================== */
 
-    const adminId = req.admin?._id;
-
-    if (adminId) {
+    if (req.admin?._id) {
       await logAudit({
-        adminId,
+        adminId: req.admin._id,
         action:
           status === "approved"
             ? "withdrawal_approved"
@@ -220,7 +229,7 @@ const processWithdrawal = async (req, res) => {
 
     res.json({
       message: `Withdrawal ${status} successfully`,
-      transferId: withdrawal.cashfreeTransferId || null,
+      transferId,
     });
 
   } catch (err) {
