@@ -1,12 +1,7 @@
 const axios = require("axios");
 
-/* ============================
-   CASHFREE PAYOUT SERVICE
-============================ */
-
 exports.sendPayout = async ({ amount }) => {
   try {
-
     const BASE_URL = "https://sandbox.cashfree.com/payout";
 
     const transferId = "tx_" + Date.now();
@@ -14,36 +9,35 @@ exports.sendPayout = async ({ amount }) => {
     const response = await axios.post(
       `${BASE_URL}/v1/requestTransfer`,
       {
-        beneId: "Test", // 🔥 SAME EXACT ID as Cashfree dashboard
+        beneId: "test_bene_001", // ✅ your created beneficiary
         amount: Number(amount),
-        transferId: transferId,
-        transferMode: "banktransfer",
-        remarks: "Withdraw payout"
+        transferId,
+        transferMode: "banktransfer", // ya "upi"
+        remarks: "Withdraw payout",
       },
       {
         headers: {
-          "X-Client-Id": process.env.APP_ID?.trim(),
-          "X-Client-Secret": process.env.SECRET_KEY?.trim(),
-          "Content-Type": "application/json"
-        }
+          "X-Client-Id": process.env.APP_ID,
+          "X-Client-Secret": process.env.SECRET_KEY,
+          "Content-Type": "application/json",
+        },
       }
     );
 
     console.log("✅ CASHFREE SUCCESS:", response.data);
 
     return {
-      transferId: response.data.transferId || transferId,
-      data: response.data
+      transferId,
+      data: response.data,
     };
 
   } catch (err) {
-
     console.error(
-      "❌ CASHFREE ERROR FULL:",
+      "❌ CASHFREE ERROR:",
       err.response?.data || err.message
     );
 
-    /* 🔥 CLEAN ERROR THROW */
+    // ✅ CLEAN ERROR THROW (INSIDE catch only)
     throw new Error(
       err.response?.data?.message ||
       JSON.stringify(err.response?.data) ||
