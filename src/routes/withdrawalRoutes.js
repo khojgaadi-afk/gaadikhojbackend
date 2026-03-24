@@ -3,6 +3,7 @@ const router = express.Router();
 
 const withdrawalController = require("../controllers/withdrawalController");
 const Withdrawal = require("../models/Withdrawal");
+const { protectAdmin } = require("../middleware/adminMiddleware");
 
 /* =========================
    USER ROUTES
@@ -15,7 +16,7 @@ router.post("/", withdrawalController.createWithdrawal);
 router.get("/my", async (req, res) => {
   try {
     const withdrawals = await Withdrawal.find({
-      user: req.user?._id, // safe optional
+      user: req.user?._id,
     }).sort({ createdAt: -1 });
 
     res.json(withdrawals);
@@ -26,14 +27,14 @@ router.get("/my", async (req, res) => {
 });
 
 /* =========================
-   ADMIN ROUTES (NO AUTH - TEST MODE)
+   ADMIN ROUTES
 ========================= */
 
 // Get all withdrawals
-router.get("/", withdrawalController.getAllWithdrawals);
+router.get("/", protectAdmin, withdrawalController.getAllWithdrawals);
 
 // Get single withdrawal
-router.get("/:id", async (req, res) => {
+router.get("/:id", protectAdmin, async (req, res) => {
   try {
     const withdrawal = await Withdrawal.findById(req.params.id)
       .populate("user", "name email");
@@ -52,6 +53,10 @@ router.get("/:id", async (req, res) => {
 });
 
 // Approve / Reject
-router.put("/:id/process", withdrawalController.processWithdrawal);
+router.put(
+  "/:id/process",
+  protectAdmin, // 🔥 MOST IMPORTANT
+  withdrawalController.processWithdrawal
+);
 
 module.exports = router;

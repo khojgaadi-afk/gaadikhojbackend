@@ -40,7 +40,6 @@ const createWithdrawal = async (req, res) => {
       });
     }
 
-    /* 🔥 BALANCE LOCK */
     const wallet = await Wallet.findOneAndUpdate(
       {
         user: req.user._id,
@@ -105,7 +104,7 @@ const getAllWithdrawals = async (req, res) => {
 };
 
 /* ==============================
-   ADMIN PROCESS WITHDRAWAL (FINAL FIXED)
+   ADMIN PROCESS WITHDRAWAL (FIXED)
 ============================== */
 
 const processWithdrawal = async (req, res) => {
@@ -116,7 +115,7 @@ const processWithdrawal = async (req, res) => {
       return res.status(400).json({ message: "Invalid status" });
     }
 
-    const withdrawal = await Withdrawal.findById(req.params.id);
+    const withdrawal = await Withdrawal.findById(req.params.id).populate("user");
 
     if (!withdrawal) {
       return res.status(404).json({ message: "Withdrawal not found" });
@@ -125,10 +124,6 @@ const processWithdrawal = async (req, res) => {
     if (withdrawal.status !== "pending") {
       return res.status(400).json({ message: "Already processed" });
     }
-
-    /* ======================
-       SET DATA
-    ====================== */
 
     withdrawal.status = status;
     withdrawal.adminNote = adminNote;
@@ -146,8 +141,6 @@ const processWithdrawal = async (req, res) => {
           phone: "9999999999",
         });
 
-        console.log("✅ PAYOUT RESPONSE:", payout);
-
         withdrawal.cashfreeTransferId =
           payout?.transferId ||
           payout?.data?.transferId ||
@@ -156,7 +149,6 @@ const processWithdrawal = async (req, res) => {
       } catch (payoutErr) {
         console.error("❌ Payout failed:", payoutErr.message);
 
-        /* 🔥 REFUND */
         const wallet = await Wallet.findOne({ user: withdrawal.user });
 
         if (wallet) {
@@ -178,10 +170,6 @@ const processWithdrawal = async (req, res) => {
         });
       }
     }
-
-    /* ======================
-       SAVE (ONLY ONCE)
-    ====================== */
 
     await withdrawal.save();
 
@@ -208,12 +196,14 @@ const processWithdrawal = async (req, res) => {
     }
 
     /* ======================
-       AUDIT LOG
+       SAFE AUDIT LOG
     ====================== */
 
-    if (req.admin) {
+    const adminId = req.admin?._id;
+
+    if (adminId) {
       await logAudit({
-        adminId: req.admin._id,
+        adminId,
         action:
           status === "approved"
             ? "withdrawal_approved"
