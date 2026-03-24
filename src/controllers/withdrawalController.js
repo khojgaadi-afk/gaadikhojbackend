@@ -105,7 +105,7 @@ const getAllWithdrawals = async (req, res) => {
 };
 
 /* ==============================
-   ADMIN PROCESS WITHDRAWAL
+   ADMIN PROCESS WITHDRAWAL (FINAL FIXED)
 ============================== */
 
 const processWithdrawal = async (req, res) => {
@@ -119,22 +119,22 @@ const processWithdrawal = async (req, res) => {
     const withdrawal = await Withdrawal.findById(req.params.id);
 
     if (!withdrawal) {
-      return res.status(404).json({
-        message: "Withdrawal not found",
-      });
+      return res.status(404).json({ message: "Withdrawal not found" });
     }
 
     if (withdrawal.status !== "pending") {
-      return res.status(400).json({
-        message: "Already processed",
-      });
+      return res.status(400).json({ message: "Already processed" });
     }
 
+    /* ======================
+       SET DATA
+    ====================== */
+
     withdrawal.status = status;
-    withdrawal.adminNote = adminNote || null;
+    withdrawal.adminNote = adminNote;
 
     /* ======================
-       CASHFREE PAYOUT
+       PAYOUT
     ====================== */
 
     if (status === "approved") {
@@ -148,19 +148,16 @@ const processWithdrawal = async (req, res) => {
 
         console.log("✅ PAYOUT RESPONSE:", payout);
 
-        /* 🔥 FINAL FIX */
         withdrawal.cashfreeTransferId =
           payout?.transferId ||
           payout?.data?.transferId ||
           null;
 
       } catch (payoutErr) {
-        console.error("❌ Payout failed:", payoutErr.response?.data || payoutErr.message);
+        console.error("❌ Payout failed:", payoutErr.message);
 
-        /* 🔥 AUTO REFUND */
-        const wallet = await Wallet.findOne({
-          user: withdrawal.user,
-        });
+        /* 🔥 REFUND */
+        const wallet = await Wallet.findOne({ user: withdrawal.user });
 
         if (wallet) {
           wallet.balance += withdrawal.amount;
@@ -182,16 +179,18 @@ const processWithdrawal = async (req, res) => {
       }
     }
 
+    /* ======================
+       SAVE (ONLY ONCE)
+    ====================== */
+
     await withdrawal.save();
 
     /* ======================
-       REFUND IF REJECTED
+       REJECT REFUND
     ====================== */
 
     if (status === "rejected") {
-      const wallet = await Wallet.findOne({
-        user: withdrawal.user,
-      });
+      const wallet = await Wallet.findOne({ user: withdrawal.user });
 
       if (wallet) {
         wallet.balance += withdrawal.amount;
@@ -231,7 +230,7 @@ const processWithdrawal = async (req, res) => {
 
     res.json({
       message: `Withdrawal ${status} successfully`,
-      transferId: withdrawal.cashfreeTransferId || null
+      transferId: withdrawal.cashfreeTransferId || null,
     });
 
   } catch (err) {
