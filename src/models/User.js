@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
       match: [/^\S+@\S+\.\S+$/, "Please use valid email"],
+      index: true,
     },
 
     password: {
@@ -57,17 +58,20 @@ const userSchema = new mongoose.Schema(
     approvedSubmissions: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     rejectedSubmissions: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     /* FRAUD DETECTION */
     suspiciousCount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     isSuspicious: {
@@ -79,6 +83,7 @@ const userSchema = new mongoose.Schema(
     loginAttempts: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     lockUntil: {
@@ -109,7 +114,7 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
-    /* RESET PASSWORD (SECURE) */
+    /* RESET PASSWORD */
     resetOTP: {
       type: String,
       default: null,
@@ -125,6 +130,7 @@ const userSchema = new mongoose.Schema(
     referralCode: {
       type: String,
       unique: true,
+      sparse: true,
     },
 
     referredBy: {
@@ -140,12 +146,14 @@ const userSchema = new mongoose.Schema(
     referralCount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     /* DAILY ADS */
     adsWatchedToday: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     lastAdDate: {
@@ -157,6 +165,7 @@ const userSchema = new mongoose.Schema(
     streakCount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     lastActiveDate: {
@@ -169,58 +178,57 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-
-
 /* ==========================
    HASH PASSWORD
 ========================== */
-userSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
 
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
 
-  this.passwordChangedAt = Date.now();
+  this.passwordChangedAt = Date.now() - 1000;
+  next();
 });
 
 /* ==========================
    GENERATE REFERRAL CODE
 ========================== */
-userSchema.pre("save", async function () {
-  if (!this.referralCode) {
-    let code;
-    let exists = true;
+userSchema.pre("save", async function (next) {
+  if (this.referralCode) return next();
 
-    while (exists) {
-      const namePart = this.name
-        .substring(0, Math.min(4, this.name.length))
-        .toUpperCase();
+  let code;
+  let exists = true;
 
-      code = namePart + Math.floor(1000 + Math.random() * 9000);
+  while (exists) {
+    const namePart = this.name
+      .substring(0, Math.min(4, this.name.length))
+      .toUpperCase();
 
-      const user = await mongoose.models.User.findOne({
-        referralCode: code,
-      });
+    code = namePart + Math.floor(1000 + Math.random() * 9000);
 
-      if (!user) exists = false;
-    }
+    const user = await mongoose.models.User.findOne({
+      referralCode: code,
+    });
 
-    this.referralCode = code;
+    if (!user) exists = false;
   }
+
+  this.referralCode = code;
+  next();
 });
 
 /* ==========================
    COMPARE PASSWORD
 ========================== */
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return bcrypt.compare(enteredPassword, this.password);
+  return await bcrypt.compare(enteredPassword, this.password);
 };
 
 /* ==========================
-   LOGIN HANDLER (ANTI-BRUTEFORCE)
+   LOGIN HANDLER
 ========================== */
 userSchema.methods.handleLogin = async function (isMatch) {
-  // Check if locked
   if (this.lockUntil && this.lockUntil > Date.now()) {
     return { success: false, message: "Account locked. Try later." };
   }
@@ -232,11 +240,10 @@ userSchema.methods.handleLogin = async function (isMatch) {
     return { success: true };
   }
 
-  // Wrong password
   this.loginAttempts += 1;
 
   if (this.loginAttempts >= 5) {
-    this.lockUntil = Date.now() + 30 * 60 * 1000; // 30 min lock
+    this.lockUntil = Date.now() + 30 * 60 * 1000;
   }
 
   await this.save();
@@ -245,11 +252,11 @@ userSchema.methods.handleLogin = async function (isMatch) {
 };
 
 /* ==========================
-   OTP GENERATION (SECURE)
+   OTP GENERATION
 ========================== */
 userSchema.methods.setOTP = function (otp) {
   this.resetOTP = crypto.createHash("sha256").update(otp).digest("hex");
-  this.otpExpire = Date.now() + 10 * 60 * 1000; // 10 min
+  this.otpExpire = Date.now() + 10 * 60 * 1000;
 };
 
 /* ==========================

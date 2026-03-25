@@ -3,12 +3,12 @@ const mongoose = require("mongoose");
 /* ==========================
    TRANSACTION SCHEMA
 ========================== */
-
 const transactionSchema = new mongoose.Schema(
   {
     amount: {
       type: Number,
       required: true,
+      min: 0,
     },
 
     type: {
@@ -17,7 +17,6 @@ const transactionSchema = new mongoose.Schema(
       required: true,
     },
 
-    /* 🔥 ADD THIS */
     source: {
       type: String,
       enum: ["ad", "referral", "withdraw", "bonus"],
@@ -27,6 +26,7 @@ const transactionSchema = new mongoose.Schema(
     description: {
       type: String,
       default: "",
+      trim: true,
     },
 
     refId: {
@@ -34,31 +34,31 @@ const transactionSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 /* ==========================
    WALLET SCHEMA
 ========================== */
-
 const walletSchema = new mongoose.Schema(
   {
     user: {
-      // ✅ FIXED (user → user)
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
       unique: true,
+      index: true,
     },
 
     balance: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     transactions: [transactionSchema],
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("Wallet", walletSchema);

@@ -20,7 +20,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: false,
-  })
+  }),
 );
 
 /* =========================
@@ -31,10 +31,10 @@ app.use(compression());
 /* =========================
    LOGGING
 ========================= */
-app.use(morgan("dev")); // 👈 simple logs
+app.use(morgan("dev"));
 
 /* =========================
-   DEBUG (VERY IMPORTANT)
+   DEBUG
 ========================= */
 app.use((req, res, next) => {
   console.log("➡️", req.method, req.originalUrl);
@@ -47,11 +47,19 @@ app.use((req, res, next) => {
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
+  message: {
+    success: false,
+    message: "Too many requests, please try again later.",
+  },
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
+  message: {
+    success: false,
+    message: "Too many login attempts, please try again later.",
+  },
 });
 
 app.use("/api", apiLimiter);
@@ -63,7 +71,7 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL || "*",
     credentials: true,
-  })
+  }),
 );
 
 /* =========================
@@ -75,13 +83,10 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 /* =========================
    STATIC
 ========================= */
-app.use(
-  "/uploads",
-  express.static(path.join(__dirname, "../uploads"))
-);
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 /* =========================
-   ROUTES
+   ROUTES IMPORT
 ========================= */
 const authRoutes = require("./routes/authRoutes");
 const userAuthRoutes = require("./routes/userAuthRoutes");
@@ -96,12 +101,35 @@ const auditRoutes = require("./routes/auditRoutes");
 const lostVehicleRoutes = require("./routes/lostVehicleRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const referralRoutes = require("./routes/referralRoutes");
+const earnRoutes = require("./routes/earnRoutes");
 
-/* AUTH */
+/* =========================
+   ROOT / HEALTH
+========================= */
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Backend is running 🚀",
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: "ok",
+    message: "🚀 Backend Running",
+  });
+});
+
+/* =========================
+   AUTH
+========================= */
 app.use("/api/admin/auth", authLimiter, authRoutes);
 app.use("/api/users/auth", authLimiter, userAuthRoutes);
 
-/* CORE */
+/* =========================
+   CORE
+========================= */
 app.use("/api/posts", postRoutes);
 app.use("/api/submissions", submissionRoutes);
 app.use("/api/wallet", walletRoutes);
@@ -110,42 +138,35 @@ app.use("/api/users", userRoutes);
 app.use("/api/withdrawals", withdrawalRoutes);
 app.use("/api/admins", adminRoutes);
 
-/* EXTRA */
+/* =========================
+   EXTRA
+========================= */
 app.use("/api/audit", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/lost-vehicles", lostVehicleRoutes);
 app.use("/api/referral", referralRoutes);
+app.use("/api/earn", earnRoutes);
 
 /* =========================
-   HEALTH
+   404 HANDLER
 ========================= */
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "🚀 Backend Running",
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
   });
 });
 
 /* =========================
-   🔥 ERROR HANDLER (FIRST)
+   ERROR HANDLER
 ========================= */
 app.use((err, req, res, next) => {
   console.error("🔥 FULL ERROR STACK:\n", err);
 
   res.status(err.status || 500).json({
     success: false,
-    message: err.message,
-    stack: err.stack, // 👈 अब exact line दिखेगी
-  });
-});
-
-/* =========================
-   404 (LAST)
-========================= */
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: "Route not found",
+    message: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
   });
 });
 
