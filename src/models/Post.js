@@ -7,44 +7,56 @@ const postSchema = new mongoose.Schema(
       required: true,
       uppercase: true,
       trim: true,
+      index: true,
     },
+
     city: {
       type: String,
       required: true,
+      trim: true,
     },
+
     area: {
       type: String,
       required: true,
+      trim: true,
     },
+
     rewardAmount: {
       type: Number,
       required: true,
+      min: 0,
     },
-    /* location */
-    location:{
-  lat:Number,
-  lng:Number
-},
+
+    /* LOCATION */
+    location: {
+      lat: {
+        type: Number,
+        default: null,
+      },
+      lng: {
+        type: Number,
+        default: null,
+      },
+    },
 
     photoUrl: {
-  type: String,
-},
-lat: {
-  type: Number,
-},
-lng: {
-  type: Number,
-},
-
+      type: String,
+      default: null,
+      trim: true,
+    },
 
     status: {
       type: String,
       enum: ["active", "expired"],
       default: "active",
+      index: true,
     },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Admin",
+      ref: "User",
+      default: null,
     },
   },
   { timestamps: true }

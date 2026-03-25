@@ -47,7 +47,6 @@ const protectUser = async (req, res, next) => {
       });
     }
 
-    /* ACCOUNT STATUS */
     if (user.status === "blocked") {
       return res.status(403).json({
         success: false,
@@ -55,7 +54,6 @@ const protectUser = async (req, res, next) => {
       });
     }
 
-    /* 🔥 TOKEN INVALIDATION (IMPORTANT) */
     if (
       user.passwordChangedAt &&
       decoded.iat * 1000 < user.passwordChangedAt.getTime()
@@ -68,8 +66,9 @@ const protectUser = async (req, res, next) => {
 
     req.user = user;
     next();
-
   } catch (error) {
+    console.error("❌ protectUser error:", error.message);
+
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token",
@@ -106,7 +105,6 @@ const protectAdmin = async (req, res, next) => {
       });
     }
 
-    /* SAME TOKEN INVALIDATION */
     if (
       admin.passwordChangedAt &&
       decoded.iat * 1000 < admin.passwordChangedAt.getTime()
@@ -118,8 +116,9 @@ const protectAdmin = async (req, res, next) => {
 
     req.admin = admin;
     next();
-
   } catch (err) {
+    console.error("❌ protectAdmin error:", err.message);
+
     return res.status(401).json({
       message: "Invalid or expired token",
     });

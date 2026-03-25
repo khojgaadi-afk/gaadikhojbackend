@@ -1,59 +1,102 @@
 const mongoose = require("mongoose");
 
-const lostVehicleSchema = new mongoose.Schema({
+const lostVehicleSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
 
-user:{
-  type:mongoose.Schema.Types.ObjectId,
-  ref:"User",
-  required:true
-},
+    vehicleNumber: {
+      type: String,
+      required: true,
+      trim: true,
+      uppercase: true,
+    },
 
-vehicleNumber:{
-type:String,
-required:true
-},
+    vehicleType: {
+      type: String,
+      enum: ["car", "bike", "scooter", "truck"],
+      required: true,
+    },
 
-vehicleType:{
-type:String,
-enum:["car","bike","scooter","truck"],
-required:true
-},
+    location: {
+      lat: {
+        type: Number,
+        default: null,
+      },
+      lng: {
+        type: Number,
+        default: null,
+      },
+    },
 
-location:{
-  lat:Number,
-  lng:Number
-},
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
 
-phone:{
-type:String,
-required:true
-},
+    brandModel: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
+    city: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-brandModel:String,
+    area: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-city:String,
-area:String,
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-description:String,
+    platformFee: {
+      type: Number,
+      default: 299,
+      min: 0,
+    },
 
-platformFee:{
-type:Number,
-default:299
-},
+    vehiclePhotos: {
+      type: [String],
+      default: [],
+    },
 
-vehiclePhotos:[String],
+    rcDocument: {
+      type: String,
+      default: null,
+    },
 
-rcDocument:String,
-firDocument:String,
-aadharDocument:String,
+    firDocument: {
+      type: String,
+      default: null,
+    },
 
-status:{
-type:String,
-enum:["pending","approved","rejected","found"],
-default:"pending"
-}
+    aadharDocument: {
+      type: String,
+      default: null,
+    },
 
-},{timestamps:true});
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "found"],
+      default: "pending",
+      index: true,
+    },
+  },
+  { timestamps: true },
+);
 
-module.exports = mongoose.model("LostVehicle",lostVehicleSchema);
+module.exports = mongoose.model("LostVehicle", lostVehicleSchema);

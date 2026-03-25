@@ -11,7 +11,7 @@ const validate = (req, res, next) => {
     });
   }
 
-  next(); // 🔥 VERY IMPORTANT
+  next();
 };
 
 module.exports = validate;

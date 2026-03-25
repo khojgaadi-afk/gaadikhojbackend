@@ -11,14 +11,14 @@ const {
 const Admin = require("../models/Admin");
 const AdminSession = require("../models/AdminSession");
 
-/* ✅ CORRECT IMPORTS */
 const { protectAdmin } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/permissionMiddleware");
+const { authorizeRoles } = require("../middleware/roleMiddleware");
+const validate = require("../middleware/validateMiddleware");
 
 /* =========================
    VALIDATION
 ========================= */
-
 const loginValidation = [
   body("email").isEmail(),
   body("password").notEmpty(),
@@ -31,30 +31,26 @@ const passwordValidation = [
 /* =========================
    REGISTER (Superadmin only)
 ========================= */
-
 router.post(
   "/register",
   protectAdmin,
-  authorize("superadmin"),
+  authorizeRoles("superadmin"),
   registerAdmin
 );
 
 /* =========================
    LOGIN
 ========================= */
-
 router.post(
   "/login",
-  loginValidation[0],
-  loginValidation[1],
-  
+  ...loginValidation,
+  validate,
   loginAdmin
 );
 
 /* =========================
    LOGOUT
 ========================= */
-
 router.post("/logout", protectAdmin, async (req, res) => {
   try {
     await AdminSession.findOneAndUpdate(
@@ -66,20 +62,18 @@ router.post("/logout", protectAdmin, async (req, res) => {
     );
 
     res.json({ message: "Logged out successfully" });
-
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
 /* =========================
-   SESSIONS (Superadmin)
+   SESSIONS (Superadmin only)
 ========================= */
-
 router.get(
   "/sessions",
   protectAdmin,
-  authorize("superadmin"), // ✅ FIXED
+  authorizeRoles("superadmin"),
   async (req, res) => {
     try {
       const sessions = await AdminSession.find()
@@ -87,7 +81,6 @@ router.get(
         .sort({ loginTime: -1 });
 
       res.json(sessions);
-
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
@@ -97,7 +90,6 @@ router.get(
 /* =========================
    CURRENT ADMIN
 ========================= */
-
 router.get("/me", protectAdmin, (req, res) => {
   res.json(req.admin);
 });
@@ -105,7 +97,6 @@ router.get("/me", protectAdmin, (req, res) => {
 /* =========================
    FORGOT PASSWORD
 ========================= */
-
 router.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
@@ -114,7 +105,9 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(400).json({ message: "Email required" });
     }
 
-    const admin = await Admin.findOne({ email });
+    const cleanEmail = email.toLowerCase().trim();
+
+    const admin = await Admin.findOne({ email: cleanEmail });
 
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
@@ -136,7 +129,6 @@ router.post("/forgot-password", async (req, res) => {
     res.json({
       message: "Reset link generated",
     });
-
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -145,10 +137,10 @@ router.post("/forgot-password", async (req, res) => {
 /* =========================
    RESET PASSWORD
 ========================= */
-
 router.post(
   "/reset-password/:token",
-  passwordValidation[0],
+  ...passwordValidation,
+  validate,
   async (req, res) => {
     try {
       const hashedToken = crypto
@@ -174,7 +166,6 @@ router.post(
       await admin.save();
 
       res.json({ message: "Password reset successful" });
-
     } catch (err) {
       res.status(500).json({ message: err.message });
     }

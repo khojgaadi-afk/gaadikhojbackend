@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const Wallet = require("../models/Wallet");
+const Referral = require("../models/Referral");
 const jwt = require("jsonwebtoken");
 
 /* =========================
@@ -27,8 +28,13 @@ const registerUser = async (req, res, next) => {
       });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanReferralCode = referralCode
+      ? referralCode.toUpperCase().trim()
+      : null;
+
     const existingUser = await User.findOne({
-      email: email.toLowerCase(),
+      email: cleanEmail,
     });
 
     if (existingUser) {
@@ -39,14 +45,14 @@ const registerUser = async (req, res, next) => {
     }
 
     const user = await User.create({
-      name,
-      email: email.toLowerCase(),
+      name: name.trim(),
+      email: cleanEmail,
       password,
       isEmailVerified: true,
     });
 
     /* =========================
-       CREATE WALLET (SAFE)
+       CREATE WALLET
     ========================= */
     await Wallet.findOneAndUpdate(
       { user: user._id },
@@ -61,17 +67,22 @@ const registerUser = async (req, res, next) => {
     );
 
     /* =========================
-       REFERRAL LOGIC (IMPROVED)
+       REFERRAL LOGIC
     ========================= */
-    if (referralCode) {
-      const refUser = await User.findOne({ referralCode });
+    if (cleanReferralCode) {
+      const refUser = await User.findOne({
+        referralCode: cleanReferralCode,
+      });
 
-      if (refUser && refUser._id.toString() !== user._id.toString()) {
-        user.referredBy = referralCode;
+      if (
+        refUser &&
+        refUser._id.toString() !== user._id.toString()
+      ) {
+        user.referredBy = cleanReferralCode;
 
         refUser.referralCount = (refUser.referralCount || 0) + 1;
 
-        // 🔥 referral reward (optional)
+        // Referral wallet reward
         await Wallet.findOneAndUpdate(
           { user: refUser._id },
           {
@@ -84,9 +95,21 @@ const registerUser = async (req, res, next) => {
                 description: "Referral bonus",
               },
             },
-          }
+          },
+          { new: true }
         );
 
+        // Referral record create
+        await Referral.create({
+          referrer: refUser._id,
+          referredUser: user._id,
+          referralCode: cleanReferralCode,
+          rewardGiven: true,
+          rewardAmount: 10,
+          status: "completed",
+        });
+
+        refUser.hasGivenReferralReward = true;
         await refUser.save();
       }
     }
@@ -101,7 +124,6 @@ const registerUser = async (req, res, next) => {
       referralCode: user.referralCode,
       token: generateToken(user._id),
     });
-
   } catch (err) {
     console.error("🔥 REGISTER ERROR:", err);
     next(err);
@@ -109,7 +131,7 @@ const registerUser = async (req, res, next) => {
 };
 
 /* =========================
-   LOGIN USER (FINAL FIXED)
+   LOGIN USER
 ========================= */
 const loginUser = async (req, res, next) => {
   try {
@@ -122,8 +144,10 @@ const loginUser = async (req, res, next) => {
       });
     }
 
+    const cleanEmail = email.toLowerCase().trim();
+
     const user = await User.findOne({
-      email: email.toLowerCase(),
+      email: cleanEmail,
     }).select("+password");
 
     if (!user) {
@@ -151,9 +175,9 @@ const loginUser = async (req, res, next) => {
       });
     }
 
-    // ⚠️ NO SAVE (important)
-    user.lastLoginIP = req.ip;
-    user.lastDevice = req.headers["user-agent"];
+    user.lastLoginIP = req.ip || null;
+    user.lastDevice = req.headers["user-agent"] || null;
+    await user.save();
 
     res.json({
       success: true,
@@ -163,7 +187,6 @@ const loginUser = async (req, res, next) => {
       referralCode: user.referralCode,
       token: generateToken(user._id),
     });
-
   } catch (err) {
     console.error("🔥 LOGIN ERROR:", err);
     next(err);

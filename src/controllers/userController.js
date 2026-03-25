@@ -1,53 +1,44 @@
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const Submission = require("../models/Submission");
 const Wallet = require("../models/Wallet");
 const Reward = require("../models/Reward");
 
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-
 /* ============================
    GET ALL USERS
 ============================ */
-
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find()
-      .select("-password")
-      .lean();
+    const users = await User.find().select("-password").lean();
 
-    /* submission count */
     const submissionCounts = await Submission.aggregate([
       {
         $group: {
-          _id: "$user", // ✅ FIXED
+          _id: "$user",
           count: { $sum: 1 },
         },
       },
     ]);
 
-    /* wallet balance */
     const walletBalances = await Wallet.aggregate([
       {
         $group: {
-          _id: "$user", // ✅ FIXED
+          _id: "$user",
           balance: { $sum: "$balance" },
         },
       },
     ]);
 
-    /* maps */
     const submissionMap = {};
     submissionCounts.forEach((s) => {
-      submissionMap[s._id?.toString()] = s.count;
+      if (s._id) submissionMap[s._id.toString()] = s.count;
     });
 
     const walletMap = {};
     walletBalances.forEach((w) => {
-      walletMap[w._id?.toString()] = w.balance;
+      if (w._id) walletMap[w._id.toString()] = w.balance;
     });
 
-    /* merge */
     const enrichedUsers = users.map((u) => ({
       ...u,
       submissions: submissionMap[u._id.toString()] || 0,
@@ -55,7 +46,6 @@ exports.getAllUsers = async (req, res) => {
     }));
 
     res.json(enrichedUsers);
-
   } catch (err) {
     console.error("❌ Get users error:", err);
     res.status(500).json({ message: "Server error" });
@@ -65,10 +55,8 @@ exports.getAllUsers = async (req, res) => {
 /* ============================
    TOGGLE USER STATUS
 ============================ */
-
 exports.toggleUserStatus = async (req, res) => {
   try {
-
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -79,18 +67,13 @@ exports.toggleUserStatus = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    user.status =
-      user.status === "active"
-        ? "blocked"
-        : "active";
-
+    user.status = user.status === "active" ? "blocked" : "active";
     await user.save();
 
     res.json({
       message: "User status updated",
       status: user.status,
     });
-
   } catch (err) {
     console.error("❌ Toggle status error:", err);
     res.status(500).json({ message: "Server error" });
@@ -100,20 +83,17 @@ exports.toggleUserStatus = async (req, res) => {
 /* ============================
    GET USER TRANSACTIONS
 ============================ */
-
 exports.getUserTransactions = async (req, res) => {
   try {
-
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
 
     const transactions = await Reward.find({
-      user: req.params.id, // ✅ FIXED
+      user: req.params.id,
     }).sort({ createdAt: -1 });
 
     res.json(transactions);
-
   } catch (err) {
     console.error("❌ Transaction error:", err);
     res.status(500).json({ message: "Server error" });
@@ -123,7 +103,6 @@ exports.getUserTransactions = async (req, res) => {
 /* ============================
    SUSPICIOUS USERS
 ============================ */
-
 exports.getSuspiciousUsers = async (req, res) => {
   try {
     const users = await User.find({
@@ -131,7 +110,6 @@ exports.getSuspiciousUsers = async (req, res) => {
     }).select("-password");
 
     res.json(users);
-
   } catch (err) {
     console.error("❌ Suspicious users error:", err);
     res.status(500).json({ message: "Server error" });
@@ -141,10 +119,8 @@ exports.getSuspiciousUsers = async (req, res) => {
 /* ============================
    FORGOT PASSWORD (SEND OTP)
 ============================ */
-
 exports.forgotPassword = async (req, res) => {
   try {
-
     const { email } = req.body;
 
     if (!email) {
@@ -154,8 +130,8 @@ exports.forgotPassword = async (req, res) => {
     }
 
     const user = await User.findOne({
-      email: email.toLowerCase(), // ✅ FIXED
-    });
+      email: email.toLowerCase().trim(),
+    }).select("+resetOTP +otpExpire");
 
     if (!user) {
       return res.status(404).json({
@@ -163,13 +139,10 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    /* OTP generate */
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    /* store hashed OTP */
-    user.resetOTP = await bcrypt.hash(otp, 10);
-    user.otpExpire = Date.now() + 10 * 60 * 1000;
-
+    // Use model method
+    user.setOTP(otp);
     await user.save();
 
     console.log("🔐 OTP (dev only):", otp);
@@ -178,7 +151,6 @@ exports.forgotPassword = async (req, res) => {
       success: true,
       message: "OTP sent successfully",
     });
-
   } catch (err) {
     console.error("❌ Forgot password error:", err);
     res.status(500).json({
@@ -191,10 +163,8 @@ exports.forgotPassword = async (req, res) => {
 /* ============================
    RESET PASSWORD
 ============================ */
-
 exports.resetPassword = async (req, res) => {
   try {
-
     const { email, otp, password } = req.body;
 
     if (!email || !otp || !password) {
@@ -210,7 +180,7 @@ exports.resetPassword = async (req, res) => {
     }
 
     const user = await User.findOne({
-      email: email.toLowerCase(),
+      email: email.toLowerCase().trim(),
     }).select("+password +resetOTP +otpExpire");
 
     if (!user) {
@@ -231,17 +201,16 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    const isMatch = await bcrypt.compare(otp, user.resetOTP);
+    const isValidOTP = user.verifyOTP(otp);
 
-    if (!isMatch) {
+    if (!isValidOTP) {
       return res.status(400).json({
         message: "Invalid OTP",
       });
     }
 
-    /* update password */
-    user.password = await bcrypt.hash(password, 10);
-
+    // IMPORTANT: plain password set करो, model pre-save hash karega
+    user.password = password;
     user.resetOTP = null;
     user.otpExpire = null;
 
@@ -251,7 +220,6 @@ exports.resetPassword = async (req, res) => {
       success: true,
       message: "Password reset successful",
     });
-
   } catch (err) {
     console.error("❌ Reset password error:", err);
     res.status(500).json({
@@ -264,10 +232,8 @@ exports.resetPassword = async (req, res) => {
 /* ============================
    LEADERBOARD
 ============================ */
-
 exports.getLeaderboard = async (req, res) => {
   try {
-
     const users = await User.find()
       .select("name approvedSubmissions trustScore")
       .sort({
@@ -277,7 +243,6 @@ exports.getLeaderboard = async (req, res) => {
       .limit(10);
 
     res.json(users);
-
   } catch (err) {
     console.error("❌ Leaderboard error:", err);
     res.status(500).json({ message: "Server error" });

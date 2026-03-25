@@ -1,19 +1,26 @@
 const axios = require("axios");
 
-exports.sendPayout = async ({ amount }) => {
+/* ==============================
+   CASHFREE PAYOUT
+============================== */
+exports.sendPayout = async ({
+  amount,
+  beneId = "test_bene_001",
+  transferMode = "banktransfer",
+  remarks = "Withdraw payout",
+}) => {
   try {
     const BASE_URL = "https://sandbox.cashfree.com/payout";
-
     const transferId = "tx_" + Date.now();
 
     const response = await axios.post(
       `${BASE_URL}/v1/requestTransfer`,
       {
-        beneId: "test_bene_001", // ✅ your created beneficiary
+        beneId,
         amount: Number(amount),
         transferId,
-        transferMode: "banktransfer", // ya "upi"
-        remarks: "Withdraw payout",
+        transferMode,
+        remarks,
       },
       {
         headers: {
@@ -30,14 +37,12 @@ exports.sendPayout = async ({ amount }) => {
       transferId,
       data: response.data,
     };
-
   } catch (err) {
     console.error(
       "❌ CASHFREE ERROR:",
       err.response?.data || err.message
     );
 
-    // ✅ CLEAN ERROR THROW (INSIDE catch only)
     throw new Error(
       err.response?.data?.message ||
       JSON.stringify(err.response?.data) ||

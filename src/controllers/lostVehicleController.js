@@ -1,165 +1,159 @@
 const LostVehicle = require("../models/LostVehicle");
 
-/* CREATE LOST VEHICLE */
+/* =========================
+   CREATE LOST VEHICLE
+========================= */
+exports.createLostVehicle = async (req, res) => {
+  try {
+    const {
+      vehicleNumber,
+      vehicleType,
+      phone,
+      brandModel,
+      city,
+      area,
+      description,
+    } = req.body;
 
-exports.createLostVehicle = async(req,res)=>{
+    if (!vehicleNumber || !vehicleType || !phone) {
+      return res.status(400).json({
+        message: "vehicleNumber, vehicleType and phone are required",
+      });
+    }
 
-try{
+    /* VEHICLE PHOTOS */
+    let photos = [];
 
-const {
-vehicleNumber,
-vehicleType,
-phone,
-brandModel,
-city,
-area,
-description
-} = req.body;
+    if (req.files?.photos) {
+      photos = req.files.photos.map(
+        (f) => `/uploads/${f.filename}`
+      );
+    }
 
+    /* DOCUMENTS */
+    const rc = req.files?.rc?.[0]
+      ? `/uploads/${req.files.rc[0].filename}`
+      : null;
 
-/* VEHICLE PHOTOS */
+    const fir = req.files?.fir?.[0]
+      ? `/uploads/${req.files.fir[0].filename}`
+      : null;
 
-let photos = [];
+    const aadhar = req.files?.aadhar?.[0]
+      ? `/uploads/${req.files.aadhar[0].filename}`
+      : null;
 
-if(req.files?.photos){
-photos = req.files.photos.map(
-f=>`/uploads/${f.filename}`
-);
-}
+    /* CREATE VEHICLE */
+    const vehicle = await LostVehicle.create({
+      user: req.user._id, // ✅ FIXED
 
+      vehicleNumber,
+      vehicleType,
+      phone,
+      brandModel,
+      city,
+      area,
+      description,
 
-/* DOCUMENTS */
+      vehiclePhotos: photos,
 
-const rc = req.files?.rc?.[0]
-? `/uploads/${req.files.rc[0].filename}`
-: null;
+      rcDocument: rc,
+      firDocument: fir,
+      aadharDocument: aadhar,
+    });
 
-const fir = req.files?.fir?.[0]
-? `/uploads/${req.files.fir[0].filename}`
-: null;
+    res.status(201).json(vehicle);
+  } catch (err) {
+    console.error("❌ Create lost vehicle error:", err);
 
-const aadhar = req.files?.aadhar?.[0]
-? `/uploads/${req.files.aadhar[0].filename}`
-: null;
-
-
-/* CREATE VEHICLE */
-
-const vehicle = await LostVehicle.create({
-
-userId:req.user._id,
-
-vehicleNumber,
-vehicleType,
-phone,
-brandModel,
-city,
-area,
-description,
-
-vehiclePhotos:photos,
-
-rcDocument:rc,
-firDocument:fir,
-aadharDocument:aadhar
-
-});
-
-res.status(201).json(vehicle);
-
-}catch(err){
-
-console.log(err);
-
-res.status(500).json({
-message:err.message
-});
-
-}
-
+    res.status(500).json({
+      message: err.message,
+    });
+  }
 };
 
+/* =========================
+   PUBLIC LIST (APP USERS)
+========================= */
+exports.getLostVehicles = async (req, res) => {
+  try {
+    const vehicles = await LostVehicle.find({
+      status: "approved",
+    })
+      .populate("user", "name") // optional
+      .sort({ createdAt: -1 });
 
+    res.json(vehicles);
+  } catch (err) {
+    console.error("❌ Get vehicles error:", err);
 
-/* PUBLIC TASKS (APP USERS) */
-
-exports.getLostVehicles = async(req,res)=>{
-
-try{
-
-const vehicles = await LostVehicle.find({
-status:"approved"
-})
-.sort({createdAt:-1});
-
-res.json(vehicles);
-
-}catch(err){
-
-res.status(500).json({
-message:err.message
-});
-
-}
-
+    res.status(500).json({
+      message: err.message,
+    });
+  }
 };
 
+/* =========================
+   ADMIN PENDING LIST
+========================= */
+exports.getPendingLostVehicles = async (req, res) => {
+  try {
+    const vehicles = await LostVehicle.find({
+      status: "pending",
+    })
+      .populate("user", "name email") // ✅ FIXED
+      .sort({ createdAt: -1 });
 
+    res.json(vehicles);
+  } catch (err) {
+    console.error("❌ Pending vehicles error:", err);
 
-/* ADMIN PENDING LIST */
-
-exports.getPendingLostVehicles = async(req,res)=>{
-
-try{
-
-const vehicles = await LostVehicle.find({
-status:"pending"
-})
-.populate("userId","name email")
-.sort({createdAt:-1});
-
-res.json(vehicles);
-
-}catch(err){
-
-res.status(500).json({
-message:err.message
-});
-
-}
-
+    res.status(500).json({
+      message: err.message,
+    });
+  }
 };
 
+/* =========================
+   ADMIN VERIFY
+========================= */
+exports.verifyLostVehicle = async (req, res) => {
+  try {
+    const { status } = req.body;
 
+    if (!["approved", "rejected", "found"].includes(status)) {
+      return res.status(400).json({
+        message: "Invalid status",
+      });
+    }
 
-/* ADMIN VERIFY */
+    const vehicle = await LostVehicle.findById(req.params.id);
 
-exports.verifyLostVehicle = async(req,res)=>{
+    if (!vehicle) {
+      return res.status(404).json({
+        message: "Vehicle not found",
+      });
+    }
 
-try{
+    if (vehicle.status !== "pending") {
+      return res.status(400).json({
+        message: "Already processed",
+      });
+    }
 
-const vehicle = await LostVehicle.findById(req.params.id);
+    vehicle.status = status;
 
-if(!vehicle){
+    await vehicle.save();
 
-return res.status(404).json({
-message:"Vehicle not found"
-});
+    res.json({
+      message: "Vehicle status updated",
+      vehicle,
+    });
+  } catch (err) {
+    console.error("❌ Verify vehicle error:", err);
 
-}
-
-vehicle.status = req.body.status;
-
-await vehicle.save();
-
-res.json(vehicle);
-
-}catch(err){
-
-res.status(500).json({
-message:err.message
-});
-
-}
-
+    res.status(500).json({
+      message: err.message,
+    });
+  }
 };

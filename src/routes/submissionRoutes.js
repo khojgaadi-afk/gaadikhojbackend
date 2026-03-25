@@ -12,16 +12,30 @@ const {
   getUserSubmissions,
 } = require("../controllers/submissionController");
 
-// ✅ CORRECT IMPORTS
-const { protectAdmin } = require("../middleware/authMiddleware");
-const { protectUser } = require("../middleware/authMiddleware");
+const {
+  protectAdmin,
+  protectUser,
+} = require("../middleware/authMiddleware");
+
 const { authorize } = require("../middleware/permissionMiddleware");
 
-/* USER */
-router.post("/", protectUser, upload.single("photo"), createSubmission);
+/* =========================
+   USER ROUTES
+========================= */
+router.post(
+  "/",
+  protectUser,
+  upload.single("photo"),
+  createSubmission
+);
+
 router.get("/user", protectUser, getUserSubmissions);
 
-/* ADMIN */
+/* =========================
+   ADMIN ROUTES
+========================= */
+
+// 🔥 IMPORTANT: specific routes first
 router.get(
   "/pending",
   protectAdmin,

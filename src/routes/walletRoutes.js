@@ -4,7 +4,7 @@ const router = express.Router();
 const Wallet = require("../models/Wallet");
 const logAudit = require("../utils/auditLogger");
 
-const { protectUser, protectAdmin } = require("../middleware/authMiddleware"); // ✅ FIXED
+const { protectUser, protectAdmin } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/permissionMiddleware");
 
 /* =========================
@@ -12,21 +12,19 @@ const { authorize } = require("../middleware/permissionMiddleware");
 ========================= */
 router.get("/me", protectUser, async (req, res) => {
   try {
-
     let wallet = await Wallet.findOne({
-      user: req.user._id
+      user: req.user._id,
     });
 
     if (!wallet) {
       wallet = await Wallet.create({
         user: req.user._id,
         balance: 0,
-        transactions: []
+        transactions: [],
       });
     }
 
     res.json(wallet);
-
   } catch (err) {
     console.error("🔥 ME WALLET ERROR:", err);
     res.status(500).json({ message: err.message });
@@ -34,12 +32,12 @@ router.get("/me", protectUser, async (req, res) => {
 });
 
 /* =========================
-   GET TRANSACTIONS
+   GET MY TRANSACTIONS
 ========================= */
-router.get("/:userId/transactions", async (req, res) => {
+router.get("/me/transactions", protectUser, async (req, res) => {
   try {
     const wallet = await Wallet.findOne({
-      user: req.params.userId   // ✅ FIXED
+      user: req.user._id,
     });
 
     if (!wallet) return res.json([]);
@@ -49,12 +47,38 @@ router.get("/:userId/transactions", async (req, res) => {
     );
 
     res.json(transactions);
-
   } catch (err) {
-    console.error("🔥 TX ERROR:", err);
+    console.error("🔥 MY TX ERROR:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
+
+/* =========================
+   ADMIN GET USER TRANSACTIONS
+========================= */
+router.get(
+  "/:userId/transactions",
+  protectAdmin,
+  authorize("wallet.manage"),
+  async (req, res) => {
+    try {
+      const wallet = await Wallet.findOne({
+        user: req.params.userId,
+      });
+
+      if (!wallet) return res.json([]);
+
+      const transactions = wallet.transactions.sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      );
+
+      res.json(transactions);
+    } catch (err) {
+      console.error("🔥 ADMIN TX ERROR:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 /* =========================
    ADMIN ADD BALANCE
@@ -66,30 +90,31 @@ router.put(
   async (req, res) => {
     try {
       const { amount } = req.body;
+      const amountNum = Number(amount);
 
-      if (!amount || Number(amount) <= 0) {
+      if (!amountNum || isNaN(amountNum) || amountNum <= 0) {
         return res.status(400).json({ message: "Invalid amount" });
       }
 
       let wallet = await Wallet.findOne({
-        user: req.params.userId   // ✅ FIXED
+        user: req.params.userId,
       });
 
       if (!wallet) {
         wallet = await Wallet.create({
-          user: req.params.userId,   // ✅ FIXED
+          user: req.params.userId,
           balance: 0,
-          transactions: []
+          transactions: [],
         });
       }
 
-      wallet.balance += Number(amount);
+      wallet.balance += amountNum;
 
       wallet.transactions.push({
-        amount: Number(amount),
+        amount: amountNum,
         type: "credit",
-        source: "bonus", // optional
-        description: "Admin balance added"
+        source: "bonus",
+        description: "Admin balance added",
       });
 
       await wallet.save();
@@ -101,16 +126,15 @@ router.put(
         resourceId: wallet._id,
         metadata: {
           userId: req.params.userId,
-          amountAdded: amount,
-          processedBy: req.admin.email
-        }
+          amountAdded: amountNum,
+          processedBy: req.admin.email,
+        },
       });
 
       res.json({
         message: "Balance added successfully",
-        balance: wallet.balance
+        balance: wallet.balance,
       });
-
     } catch (err) {
       console.error("🔥 ADMIN WALLET ERROR:", err);
       res.status(500).json({ message: "Server error" });

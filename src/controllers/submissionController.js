@@ -1,30 +1,35 @@
 const Submission = require("../models/Submission");
 const Post = require("../models/Post");
-const { creditReward } = require("../services/payoutService");
-const { sendNotification } = require("../utils/sendNotification");
 const User = require("../models/User");
+const { creditReward } = require("../services/rewardService");
+const { sendNotification } = require("../utils/sendNotification");
 
 /* ===============================
    USER SUBMITS PROOF
 ================================ */
-
 const createSubmission = async (req, res) => {
   try {
-    const { postId, lat, lng } = req.body;
+    const { postId, lat, lng, notes } = req.body;
 
     const user = await User.findById(req.user._id);
 
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
     if (user.trustScore < 1) {
       return res.status(403).json({
-        message: "Your account is restricted due to low trust score"
+        message: "Your account is restricted due to low trust score",
       });
     }
 
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
     const recentSubmissions = await Submission.countDocuments({
-      userId: req.user._id,
-      createdAt: { $gte: twoMinutesAgo }
+      user: req.user._id,
+      createdAt: { $gte: twoMinutesAgo },
     });
 
     if (recentSubmissions >= 5) {
@@ -37,13 +42,13 @@ const createSubmission = async (req, res) => {
       await user.save();
 
       return res.status(429).json({
-        message: "Too many submissions. Suspicious activity detected."
+        message: "Too many submissions. Suspicious activity detected.",
       });
     }
 
     if (!req.file) {
       return res.status(400).json({
-        message: "Photo required"
+        message: "Photo required",
       });
     }
 
@@ -51,39 +56,54 @@ const createSubmission = async (req, res) => {
 
     if (!post) {
       return res.status(404).json({
-        message: "Post not found"
+        message: "Post not found",
       });
     }
 
     const latNum = Number(lat);
     const lngNum = Number(lng);
 
+    if (isNaN(latNum) || isNaN(lngNum)) {
+      return res.status(400).json({
+        message: "Invalid location coordinates",
+      });
+    }
+
+    const postLat = post.location?.lat;
+    const postLng = post.location?.lng;
+
+    if (postLat == null || postLng == null) {
+      return res.status(400).json({
+        message: "Target location missing for this post",
+      });
+    }
+
     const distance = Math.sqrt(
-      Math.pow(post.lat - latNum, 2) +
-      Math.pow(post.lng - lngNum, 2)
+      Math.pow(postLat - latNum, 2) +
+      Math.pow(postLng - lngNum, 2)
     );
 
     if (distance > 0.01) {
       return res.status(400).json({
-        message: "Too far from target location"
+        message: "Too far from target location",
       });
     }
 
     const exist = await Submission.findOne({
-      postId,
-      userId: req.user._id
+      post: postId,
+      user: req.user._id,
     });
 
     if (exist) {
       return res.status(400).json({
-        message: "You already submitted this task"
+        message: "You already submitted this task",
       });
     }
 
     const photoPath = `/uploads/${req.file.filename}`;
 
     const duplicatePhoto = await Submission.findOne({
-      photoUrl: photoPath
+      photoUrl: photoPath,
     });
 
     if (duplicatePhoto) {
@@ -96,26 +116,26 @@ const createSubmission = async (req, res) => {
       await user.save();
 
       return res.status(400).json({
-        message: "Duplicate photo detected"
+        message: "Duplicate photo detected",
       });
     }
 
     const submission = await Submission.create({
-      postId,
-      userId: req.user._id,
+      post: postId,
+      user: req.user._id,
       photoUrl: photoPath,
+      notes: notes || "",
       lat: latNum,
       lng: lngNum,
-      status: "pending"
+      status: "pending",
     });
 
     res.status(201).json(submission);
-
   } catch (err) {
-    console.error("Create submission error:", err);
+    console.error("❌ Create submission error:", err);
 
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
@@ -123,20 +143,19 @@ const createSubmission = async (req, res) => {
 /* ===============================
    USER – MY SUBMISSIONS
 ================================ */
-
 const getUserSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({
-      userId: req.user._id
+      user: req.user._id,
     })
-      .populate("postId", "carNumber city area rewardAmount")
+      .populate("post", "carNumber city area rewardAmount")
       .sort({ createdAt: -1 });
 
     res.json(submissions);
-
   } catch (err) {
+    console.error("❌ Get user submissions error:", err);
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
@@ -144,31 +163,41 @@ const getUserSubmissions = async (req, res) => {
 /* ===============================
    ADMIN VERIFY SUBMISSION
 ================================ */
-
 const verifySubmission = async (req, res) => {
   try {
     const { status } = req.body;
+
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).json({
+        message: "Invalid status",
+      });
+    }
 
     const submission = await Submission.findById(req.params.id);
 
     if (!submission) {
       return res.status(404).json({
-        message: "Submission not found"
+        message: "Submission not found",
       });
     }
 
     if (submission.status !== "pending") {
       return res.status(400).json({
-        message: "Submission already processed"
+        message: "Submission already processed",
       });
     }
 
     submission.status = status;
     submission.verifiedBy = req.admin._id;
+    submission.verifiedAt = new Date();
 
-    await submission.save();
+    const user = await User.findById(submission.user);
 
-    const user = await User.findById(submission.userId);
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
 
     if (status === "approved") {
       user.approvedSubmissions += 1;
@@ -181,45 +210,52 @@ const verifySubmission = async (req, res) => {
     const total = user.approvedSubmissions + user.rejectedSubmissions;
 
     if (total > 0) {
-      user.trustScore = (user.approvedSubmissions / total) * 5;
+      user.trustScore = Number(
+        ((user.approvedSubmissions / total) * 5).toFixed(2)
+      );
     }
 
-    await user.save();
+    let rewardAmount = 0;
 
     if (status === "approved") {
-      const post = await Post.findById(submission.postId);
+      const post = await Post.findById(submission.post);
 
       if (!post) {
         return res.status(404).json({
-          message: "Post not found"
+          message: "Post not found",
         });
       }
 
+      rewardAmount = post.rewardAmount || 0;
+      submission.rewardAmount = rewardAmount;
+
       await creditReward({
-        userId: submission.userId,
-        amount: post.rewardAmount,
-        refId: submission._id.toString()
+        userId: submission.user,
+        amount: rewardAmount,
+        refId: submission._id.toString(),
       });
 
       if (user?.pushToken) {
         await sendNotification(
           user.pushToken,
           "💰 Reward Approved",
-          `You earned ₹${post.rewardAmount} for finding vehicle`
+          `You earned ₹${rewardAmount} for finding vehicle`
         );
       }
     }
 
+    await submission.save();
+    await user.save();
+
     res.json({
       message: "Submission updated successfully",
-      submission
+      submission,
     });
-
   } catch (err) {
-    console.error("Verify submission error:", err);
+    console.error("❌ Verify submission error:", err);
 
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
@@ -227,19 +263,18 @@ const verifySubmission = async (req, res) => {
 /* ===============================
    ADMIN – PENDING
 ================================ */
-
 const getPendingSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({ status: "pending" })
-      .populate("postId", "carNumber city area rewardAmount")
-      .populate("userId", "email name")
+      .populate("post", "carNumber city area rewardAmount")
+      .populate("user", "email name")
       .sort({ createdAt: -1 });
 
     res.json(submissions);
-
   } catch (err) {
+    console.error("❌ Pending submissions error:", err);
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
@@ -247,24 +282,23 @@ const getPendingSubmissions = async (req, res) => {
 /* ===============================
    ADMIN – SINGLE
 ================================ */
-
 const getSubmissionById = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id)
-      .populate("postId", "carNumber city area rewardAmount")
-      .populate("userId", "email name");
+      .populate("post", "carNumber city area rewardAmount")
+      .populate("user", "email name");
 
     if (!submission) {
       return res.status(404).json({
-        message: "Submission not found"
+        message: "Submission not found",
       });
     }
 
     res.json(submission);
-
   } catch (err) {
+    console.error("❌ Get submission by id error:", err);
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
@@ -272,7 +306,6 @@ const getSubmissionById = async (req, res) => {
 /* ===============================
    ADMIN – ALL
 ================================ */
-
 const getAllSubmissions = async (req, res) => {
   try {
     const { status, from, to } = req.query;
@@ -289,22 +322,18 @@ const getAllSubmissions = async (req, res) => {
     }
 
     const submissions = await Submission.find(query)
-      .populate("postId", "carNumber city area rewardAmount")
-      .populate("userId", "email name")
+      .populate("post", "carNumber city area rewardAmount")
+      .populate("user", "email name")
       .sort({ createdAt: -1 });
 
     res.json(submissions);
-
   } catch (err) {
+    console.error("❌ Get all submissions error:", err);
     res.status(500).json({
-      message: err.message
+      message: err.message,
     });
   }
 };
-
-/* ===============================
-   EXPORT (MOST IMPORTANT)
-================================ */
 
 module.exports = {
   createSubmission,
@@ -312,5 +341,5 @@ module.exports = {
   getPendingSubmissions,
   getAllSubmissions,
   getSubmissionById,
-  getUserSubmissions
+  getUserSubmissions,
 };

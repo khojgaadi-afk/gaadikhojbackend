@@ -1,9 +1,11 @@
 const express = require("express");
 const router = express.Router();
 
-// ✅ FIXED IMPORTS
-const { protectAdmin } = require("../middleware/authMiddleware");
-const { protectUser } = require("../middleware/authMiddleware");
+const {
+  protectAdmin,
+  protectUser,
+} = require("../middleware/authMiddleware");
+
 const { authorizeRoles } = require("../middleware/roleMiddleware");
 
 const User = require("../models/User");
@@ -15,14 +17,18 @@ const {
   getLeaderboard,
   getSuspiciousUsers,
   forgotPassword,
-  resetPassword
+  resetPassword,
 } = require("../controllers/userController");
 
-/* AUTH ROUTES */
+/* =========================
+   AUTH ROUTES
+========================= */
 router.post("/auth/forgot-password", forgotPassword);
-router.post("/auth/reset-password", resetPassword);
+router.post("/auth/reset-password", resetPassword); // keep if controller expects body token
 
-/* USER ROUTES */
+/* =========================
+   USER ROUTES
+========================= */
 router.get("/me", protectUser, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("-password");
@@ -34,7 +40,9 @@ router.get("/me", protectUser, async (req, res) => {
 
 router.get("/leaderboard", getLeaderboard);
 
-/* ADMIN ROUTES */
+/* =========================
+   ADMIN ROUTES
+========================= */
 router.get(
   "/suspicious",
   protectAdmin,

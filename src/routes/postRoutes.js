@@ -6,20 +6,25 @@ const {
   getActivePosts,
 } = require("../controllers/postController");
 
-// ✅ FIXED
 const { protectAdmin } = require("../middleware/authMiddleware");
+const { authorize } = require("../middleware/permissionMiddleware");
 
 const upload = require("../utils/upload");
 
-// 🔐 Admin creates car post
+/* =========================
+   ADMIN CREATE POST
+========================= */
 router.post(
   "/",
   protectAdmin,
+  authorize("posts.manage"),
   upload.single("photo"),
   createPost
 );
 
-// 🌍 Public / user: get all active posts
+/* =========================
+   PUBLIC / USER GET ACTIVE POSTS
+========================= */
 router.get("/", getActivePosts);
 
 module.exports = router;

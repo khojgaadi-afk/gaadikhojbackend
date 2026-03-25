@@ -6,6 +6,9 @@ const adminSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      trim: true,
+      minlength: 2,
+      maxlength: 50,
     },
 
     email: {
@@ -13,46 +16,62 @@ const adminSchema = new mongoose.Schema(
       required: true,
       unique: true,
       lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, "Please use valid email"],
+      index: true,
     },
 
     password: {
       type: String,
       required: true,
+      minlength: 6,
+      select: false,
     },
 
     role: {
       type: String,
       enum: ["superadmin", "moderator", "finance"],
       default: "moderator",
+      index: true,
     },
 
     status: {
       type: String,
       enum: ["active", "blocked"],
       default: "active",
+      index: true,
     },
 
-    // 🔥 Password Reset Fields
+    /* PASSWORD RESET */
     resetToken: {
       type: String,
+      default: null,
+      select: false,
     },
 
     resetTokenExpire: {
       type: Date,
+      default: null,
     },
   },
   { timestamps: true }
 );
 
-// 🔐 Hash password before save
-adminSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
+/* ==========================
+   HASH PASSWORD
+========================== */
+adminSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
+
   this.password = await bcrypt.hash(this.password, 10);
+  next();
 });
 
-// 🔐 Match password
+/* ==========================
+   MATCH PASSWORD
+========================== */
 adminSchema.methods.matchPassword = async function (entered) {
-  return bcrypt.compare(entered, this.password);
+  return await bcrypt.compare(entered, this.password);
 };
 
 module.exports = mongoose.model("Admin", adminSchema);

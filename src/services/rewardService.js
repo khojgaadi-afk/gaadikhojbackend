@@ -16,9 +16,7 @@ exports.creditReward = async ({ userId, amount, refId, source = "submission" }) 
       throw new Error("Invalid amount");
     }
 
-    /* ============================
-       DUPLICATE REWARD CHECK
-    ============================ */
+    /* DUPLICATE REWARD CHECK */
     const existingReward = await Reward.findOne({
       user: userId,
       refId,
@@ -31,9 +29,7 @@ exports.creditReward = async ({ userId, amount, refId, source = "submission" }) 
       return existingReward;
     }
 
-    /* ============================
-       FIND OR CREATE WALLET
-    ============================ */
+    /* FIND OR CREATE WALLET */
     let wallet = await Wallet.findOne({ user: userId });
 
     if (!wallet) {
@@ -44,9 +40,7 @@ exports.creditReward = async ({ userId, amount, refId, source = "submission" }) 
       });
     }
 
-    /* ============================
-       CREDIT BALANCE
-    ============================ */
+    /* CREDIT BALANCE */
     wallet.balance += amountNum;
 
     wallet.transactions.push({
@@ -62,9 +56,7 @@ exports.creditReward = async ({ userId, amount, refId, source = "submission" }) 
 
     await wallet.save();
 
-    /* ============================
-       CREATE REWARD RECORD
-    ============================ */
+    /* CREATE REWARD RECORD */
     const reward = await Reward.create({
       user: userId,
       amount: amountNum,

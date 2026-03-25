@@ -1,29 +1,58 @@
 const mongoose = require("mongoose");
 
-const findProofSchema = new mongoose.Schema({
+const findProofSchema = new mongoose.Schema(
+  {
+    vehicle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LostVehicle",
+      required: true,
+      index: true,
+    },
 
-vehicleId:{
-type:mongoose.Schema.Types.ObjectId,
-ref:"LostVehicle"
-},
+    finder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
 
-finderId:{
-type:mongoose.Schema.Types.ObjectId,
-ref:"User"
-},
+    photo: {
+      type: String,
+      default: null,
+      trim: true,
+    },
 
-photo:String,
+    location: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-location:String,
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+    },
 
-description:String,
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
+    },
 
-status:{
-type:String,
-enum:["pending","approved","rejected"],
-default:"pending"
-}
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
-},{timestamps:true});
+    reviewedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model("FindProof",findProofSchema);
+module.exports = mongoose.model("FindProof", findProofSchema);
