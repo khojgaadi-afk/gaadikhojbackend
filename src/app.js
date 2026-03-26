@@ -102,7 +102,7 @@ const lostVehicleRoutes = require("./routes/lostVehicleRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const earnRoutes = require("./routes/earnRoutes");
-
+const taskRoutes = require("./routes/taskRoutes");
 /* =========================
    ROOT / HEALTH
 ========================= */
@@ -146,6 +146,8 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/lost-vehicles", lostVehicleRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/earn", earnRoutes);
+app.use("/api/tasks", taskRoutes);
+
 
 /* =========================
    404 HANDLER
