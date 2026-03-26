@@ -161,6 +161,24 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+        /* EGG BATCH SYSTEM */
+    firstBatchWatched: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    secondBatchWatched: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    secondBatchUnlockAt: {
+      type: Date,
+      default: null,
+    },
+
     /* STREAK SYSTEM */
     streakCount: {
       type: Number,
