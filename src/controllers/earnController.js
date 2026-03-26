@@ -13,14 +13,30 @@ exports.watchAd = async (req, res) => {
       return res.status(404).json({ msg: "User not found" });
     }
 
+    /* =========================
+       SAFE DEFAULTS (🔥 IMPORTANT)
+    ========================= */
+    if (typeof user.adsWatchedToday !== "number") {
+      user.adsWatchedToday = 0;
+    }
+
+    if (typeof user.streakCount !== "number") {
+      user.streakCount = 0;
+    }
+
     const today = new Date().toDateString();
 
-    /* RESET DAILY LIMIT */
-    if (user.lastAdDate?.toDateString() !== today) {
+    /* =========================
+       RESET DAILY LIMIT
+    ========================= */
+    if (!user.lastAdDate || user.lastAdDate.toDateString() !== today) {
       user.adsWatchedToday = 0;
       user.lastAdDate = new Date();
     }
 
+    /* =========================
+       DAILY LIMIT
+    ========================= */
     if (user.adsWatchedToday >= 10) {
       return res.status(400).json({
         msg: "Daily limit reached",
@@ -29,12 +45,15 @@ exports.watchAd = async (req, res) => {
 
     let reward = 2;
 
-    /* STREAK LOGIC */
-    const yesterday = new Date(
-      Date.now() - 86400000
-    ).toDateString();
+    /* =========================
+       STREAK LOGIC
+    ========================= */
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
 
-    if (user.lastActiveDate?.toDateString() === yesterday) {
+    if (
+      user.lastActiveDate &&
+      user.lastActiveDate.toDateString() === yesterday
+    ) {
       user.streakCount += 1;
       reward += user.streakCount;
     } else {
@@ -44,7 +63,9 @@ exports.watchAd = async (req, res) => {
     user.lastActiveDate = new Date();
     user.adsWatchedToday += 1;
 
-    /* WALLET UPDATE (SAFE) */
+    /* =========================
+       WALLET SAFE UPDATE
+    ========================= */
     let wallet = await Wallet.findOne({ user: user._id });
 
     if (!wallet) {
@@ -62,31 +83,43 @@ exports.watchAd = async (req, res) => {
       type: "credit",
       source: "ad",
       description: "Ad reward earned",
+      status: "success",
+      createdAt: new Date(),
     });
 
     await wallet.save();
 
-    /* REWARD ENTRY (IMPORTANT) */
-    await Reward.create({
-      user: user._id,
-      amount: reward,
-      type: "credit",
-      source: "ad",
-      description: "Ad watch reward",
-    });
+    /* =========================
+       REWARD ENTRY (SAFE)
+    ========================= */
+    if (Reward) {
+      await Reward.create({
+        user: user._id,
+        amount: reward,
+        type: "credit",
+        source: "ad",
+        description: "Ad watch reward",
+      });
+    }
 
     await user.save();
 
+    /* =========================
+       RESPONSE
+    ========================= */
     res.json({
       reward,
       streak: user.streakCount,
       remaining: 10 - user.adsWatchedToday,
+      balance: wallet.balance, // 🔥 added
     });
+
   } catch (err) {
-    console.error("❌ Watch ad error:", err);
+    console.error("❌ Watch ad error FULL:", err);
 
     res.status(500).json({
       msg: "Server error",
+      error: err.message, // 🔥 debug helpful
     });
   }
 };

@@ -7,39 +7,57 @@ const LostVehicle = require("../models/LostVehicle");
 ================================ */
 const getAvailableTasks = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user._id.toString();
 
     /* ===============================
-       ALL POSTS + LOST VEHICLES
+       FETCH ALL
     ================================ */
     const [posts, vehicles, submissions] = await Promise.all([
       Post.find({ status: "active" }).lean(),
       LostVehicle.find({ status: "approved" }).lean(),
-      Submission.find({
-        status: { $in: ["pending", "approved"] },
-      }).lean(),
+      Submission.find({}).lean(), // ✅ ALL submissions
     ]);
 
     /* ===============================
-       TAKEN IDS
+       BLOCKED IDS
     ================================ */
-    const takenPostIds = new Set();
-    const takenVehicleIds = new Set();
-    const myPostIds = new Set();
-    const myVehicleIds = new Set();
+    const blockedPostIds = new Set();
+    const blockedVehicleIds = new Set();
 
     submissions.forEach((s) => {
+      const isMine = String(s.user) === userId;
+
+      // =========================
+      // POST TASK RULES
+      // =========================
       if (s.post) {
-        takenPostIds.add(String(s.post));
-        if (String(s.user) === String(userId)) {
-          myPostIds.add(String(s.post));
+        const postId = String(s.post);
+
+        // 🔥 If I already submitted (any status) => hide forever
+        if (isMine) {
+          blockedPostIds.add(postId);
+        }
+
+        // 🔥 If someone else already has pending/approved => hide
+        if (!isMine && ["pending", "approved"].includes(s.status)) {
+          blockedPostIds.add(postId);
         }
       }
 
+      // =========================
+      // VEHICLE TASK RULES
+      // =========================
       if (s.vehicle) {
-        takenVehicleIds.add(String(s.vehicle));
-        if (String(s.user) === String(userId)) {
-          myVehicleIds.add(String(s.vehicle));
+        const vehicleId = String(s.vehicle);
+
+        // 🔥 If I already submitted (any status) => hide forever
+        if (isMine) {
+          blockedVehicleIds.add(vehicleId);
+        }
+
+        // 🔥 If someone else already has pending/approved => hide
+        if (!isMine && ["pending", "approved"].includes(s.status)) {
+          blockedVehicleIds.add(vehicleId);
         }
       }
     });
@@ -48,11 +66,7 @@ const getAvailableTasks = async (req, res) => {
        FILTER POSTS
     ================================ */
     const filteredPosts = posts
-      .filter(
-        (p) =>
-          !takenPostIds.has(String(p._id)) &&
-          !myPostIds.has(String(p._id))
-      )
+      .filter((p) => !blockedPostIds.has(String(p._id)))
       .map((p) => ({
         ...p,
         type: "post",
@@ -62,11 +76,7 @@ const getAvailableTasks = async (req, res) => {
        FILTER VEHICLES
     ================================ */
     const filteredVehicles = vehicles
-      .filter(
-        (v) =>
-          !takenVehicleIds.has(String(v._id)) &&
-          !myVehicleIds.has(String(v._id))
-      )
+      .filter((v) => !blockedVehicleIds.has(String(v._id)))
       .map((v) => ({
         ...v,
         type: "lostVehicle",
