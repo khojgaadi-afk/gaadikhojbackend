@@ -1,5 +1,6 @@
 const Submission = require("../models/Submission");
 const Post = require("../models/Post");
+const LostVehicle = require("../models/LostVehicle");
 const User = require("../models/User");
 const { creditReward } = require("../services/rewardService");
 const { sendNotification } = require("../utils/sendNotification");
@@ -9,7 +10,7 @@ const { sendNotification } = require("../utils/sendNotification");
 ================================ */
 const createSubmission = async (req, res) => {
   try {
-    const { postId, lat, lng, notes } = req.body;
+    const { postId, vehicleId, lat, lng, notes } = req.body;
 
     const user = await User.findById(req.user._id);
 
@@ -52,11 +53,9 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    const post = await Post.findById(postId);
-
-    if (!post) {
-      return res.status(404).json({
-        message: "Post not found",
+    if (!postId && !vehicleId) {
+      return res.status(400).json({
+        message: "Task ID is required",
       });
     }
 
@@ -69,35 +68,103 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    const postLat = post.location?.lat;
-    const postLng = post.location?.lng;
+    let target = null;
+    let taskType = null;
 
-    if (postLat == null || postLng == null) {
-      return res.status(400).json({
-        message: "Target location missing for this post",
+    /* ===============================
+       POST TASK
+    ================================ */
+    if (postId) {
+      const post = await Post.findById(postId);
+
+      if (!post) {
+        return res.status(404).json({
+          message: "Post not found",
+        });
+      }
+
+      // ✅ agar kisi aur ka approved/pending already hai toh block
+      const alreadyTaken = await Submission.findOne({
+        post: postId,
+        status: { $in: ["pending", "approved"] },
       });
+
+      if (alreadyTaken) {
+        return res.status(400).json({
+          message: "This task is already submitted by another user",
+        });
+      }
+
+      const exist = await Submission.findOne({
+        post: postId,
+        user: req.user._id,
+      });
+
+      if (exist) {
+        return res.status(400).json({
+          message: "You already submitted this task",
+        });
+      }
+
+      const postLat = post.location?.lat;
+      const postLng = post.location?.lng;
+
+      if (postLat == null || postLng == null) {
+        return res.status(400).json({
+          message: "Target location missing for this post",
+        });
+      }
+
+      const distance = Math.sqrt(
+        Math.pow(postLat - latNum, 2) + Math.pow(postLng - lngNum, 2)
+      );
+
+      if (distance > 0.01) {
+        return res.status(400).json({
+          message: "Too far from target location",
+        });
+      }
+
+      target = post;
+      taskType = "post";
     }
 
-    const distance = Math.sqrt(
-      Math.pow(postLat - latNum, 2) +
-      Math.pow(postLng - lngNum, 2)
-    );
+    /* ===============================
+       LOST VEHICLE TASK
+    ================================ */
+    if (vehicleId) {
+      const vehicle = await LostVehicle.findById(vehicleId);
 
-    if (distance > 0.01) {
-      return res.status(400).json({
-        message: "Too far from target location",
+      if (!vehicle) {
+        return res.status(404).json({
+          message: "Vehicle not found",
+        });
+      }
+
+      const alreadyTaken = await Submission.findOne({
+        vehicle: vehicleId,
+        status: { $in: ["pending", "approved"] },
       });
-    }
 
-    const exist = await Submission.findOne({
-      post: postId,
-      user: req.user._id,
-    });
+      if (alreadyTaken) {
+        return res.status(400).json({
+          message: "This vehicle task is already submitted by another user",
+        });
+      }
 
-    if (exist) {
-      return res.status(400).json({
-        message: "You already submitted this task",
+      const exist = await Submission.findOne({
+        vehicle: vehicleId,
+        user: req.user._id,
       });
+
+      if (exist) {
+        return res.status(400).json({
+          message: "You already submitted this vehicle task",
+        });
+      }
+
+      target = vehicle;
+      taskType = "vehicle";
     }
 
     const photoPath = `/uploads/${req.file.filename}`;
@@ -120,15 +187,24 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    const submission = await Submission.create({
-      post: postId,
+    const submissionData = {
       user: req.user._id,
       photoUrl: photoPath,
       notes: notes || "",
       lat: latNum,
       lng: lngNum,
       status: "pending",
-    });
+    };
+
+    if (taskType === "post") {
+      submissionData.post = postId;
+    }
+
+    if (taskType === "vehicle") {
+      submissionData.vehicle = vehicleId;
+    }
+
+    const submission = await Submission.create(submissionData);
 
     res.status(201).json(submission);
   } catch (err) {
@@ -138,208 +214,4 @@ const createSubmission = async (req, res) => {
       message: err.message,
     });
   }
-};
-
-/* ===============================
-   USER – MY SUBMISSIONS
-================================ */
-const getUserSubmissions = async (req, res) => {
-  try {
-    const submissions = await Submission.find({
-      user: req.user._id,
-    })
-      .populate("post", "carNumber city area rewardAmount")
-      .sort({ createdAt: -1 });
-
-    res.json(submissions);
-  } catch (err) {
-    console.error("❌ Get user submissions error:", err);
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-};
-
-/* ===============================
-   ADMIN VERIFY SUBMISSION
-================================ */
-const verifySubmission = async (req, res) => {
-  try {
-    const { status } = req.body;
-
-    if (!["approved", "rejected"].includes(status)) {
-      return res.status(400).json({
-        message: "Invalid status",
-      });
-    }
-
-    const submission = await Submission.findById(req.params.id);
-
-    if (!submission) {
-      return res.status(404).json({
-        message: "Submission not found",
-      });
-    }
-
-    if (submission.status !== "pending") {
-      return res.status(400).json({
-        message: "Submission already processed",
-      });
-    }
-
-    submission.status = status;
-    submission.verifiedBy = req.admin._id;
-    submission.verifiedAt = new Date();
-
-    const user = await User.findById(submission.user);
-
-    if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
-    }
-
-    if (status === "approved") {
-      user.approvedSubmissions += 1;
-    }
-
-    if (status === "rejected") {
-      user.rejectedSubmissions += 1;
-    }
-
-    const total = user.approvedSubmissions + user.rejectedSubmissions;
-
-    if (total > 0) {
-      user.trustScore = Number(
-        ((user.approvedSubmissions / total) * 5).toFixed(2)
-      );
-    }
-
-    let rewardAmount = 0;
-
-    if (status === "approved") {
-      const post = await Post.findById(submission.post);
-
-      if (!post) {
-        return res.status(404).json({
-          message: "Post not found",
-        });
-      }
-
-      rewardAmount = post.rewardAmount || 0;
-      submission.rewardAmount = rewardAmount;
-
-      await creditReward({
-        userId: submission.user,
-        amount: rewardAmount,
-        refId: submission._id.toString(),
-      });
-
-      if (user?.pushToken) {
-        await sendNotification(
-          user.pushToken,
-          "💰 Reward Approved",
-          `You earned ₹${rewardAmount} for finding vehicle`
-        );
-      }
-    }
-
-    await submission.save();
-    await user.save();
-
-    res.json({
-      message: "Submission updated successfully",
-      submission,
-    });
-  } catch (err) {
-    console.error("❌ Verify submission error:", err);
-
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-};
-
-/* ===============================
-   ADMIN – PENDING
-================================ */
-const getPendingSubmissions = async (req, res) => {
-  try {
-    const submissions = await Submission.find({ status: "pending" })
-      .populate("post", "carNumber city area rewardAmount")
-      .populate("user", "email name")
-      .sort({ createdAt: -1 });
-
-    res.json(submissions);
-  } catch (err) {
-    console.error("❌ Pending submissions error:", err);
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-};
-
-/* ===============================
-   ADMIN – SINGLE
-================================ */
-const getSubmissionById = async (req, res) => {
-  try {
-    const submission = await Submission.findById(req.params.id)
-      .populate("post", "carNumber city area rewardAmount")
-      .populate("user", "email name");
-
-    if (!submission) {
-      return res.status(404).json({
-        message: "Submission not found",
-      });
-    }
-
-    res.json(submission);
-  } catch (err) {
-    console.error("❌ Get submission by id error:", err);
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-};
-
-/* ===============================
-   ADMIN – ALL
-================================ */
-const getAllSubmissions = async (req, res) => {
-  try {
-    const { status, from, to } = req.query;
-
-    const query = {};
-
-    if (status) query.status = status;
-
-    if (from || to) {
-      query.createdAt = {};
-
-      if (from) query.createdAt.$gte = new Date(from);
-      if (to) query.createdAt.$lte = new Date(to);
-    }
-
-    const submissions = await Submission.find(query)
-      .populate("post", "carNumber city area rewardAmount")
-      .populate("user", "email name")
-      .sort({ createdAt: -1 });
-
-    res.json(submissions);
-  } catch (err) {
-    console.error("❌ Get all submissions error:", err);
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-};
-
-module.exports = {
-  createSubmission,
-  verifySubmission,
-  getPendingSubmissions,
-  getAllSubmissions,
-  getSubmissionById,
-  getUserSubmissions,
 };
