@@ -6,6 +6,27 @@ const { creditReward } = require("../services/rewardService");
 const { sendNotification } = require("../utils/sendNotification");
 
 /* ===============================
+   HELPERS
+================================ */
+const toRad = (value) => (value * Math.PI) / 180;
+
+const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+/* ===============================
    USER SUBMITS PROOF
 ================================ */
 const createSubmission = async (req, res) => {
@@ -20,7 +41,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    // 🔥 Trust score safe check
+    /* 🔥 Trust score safe check */
     if (typeof user.trustScore === "number" && user.trustScore < 1) {
       return res.status(403).json({
         message: "Your account is restricted due to low trust score",
@@ -71,7 +92,7 @@ const createSubmission = async (req, res) => {
 
     const photoPath = `/uploads/${req.file.filename}`;
 
-    // 🔥 Duplicate image safe check
+    /* 🔥 Duplicate image safe check */
     const duplicatePhoto = await Submission.findOne({
       photoUrl: photoPath,
     });
@@ -111,7 +132,14 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      // 🔥 If already taken by someone else
+      /* 🔥 Task must be active */
+      if (post.status && post.status !== "active") {
+        return res.status(400).json({
+          message: "This task is no longer active",
+        });
+      }
+
+      /* 🔥 If already taken by someone else */
       const alreadyTaken = await Submission.findOne({
         post: postId,
         status: { $in: ["pending", "approved"] },
@@ -123,7 +151,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      // 🔥 Same user duplicate block
+      /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         post: postId,
         user: req.user._id,
@@ -135,28 +163,39 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      // 🔥 Location validation
-      const postLat = post.location?.lat;
-      const postLng = post.location?.lng;
+      /* 🔥 OPTIONAL LOCATION VALIDATION
+         Agar post.location missing hai toh reject mat karo */
+      const postLat = Number(post.location?.lat);
+      const postLng = Number(post.location?.lng);
 
-      if (postLat == null || postLng == null) {
-        return res.status(400).json({
-          message: "Target location missing for this post",
-        });
-      }
+      const hasTargetLocation =
+        post.location?.lat !== undefined &&
+        post.location?.lat !== null &&
+        post.location?.lng !== undefined &&
+        post.location?.lng !== null &&
+        !isNaN(postLat) &&
+        !isNaN(postLng);
 
-      const distance = Math.sqrt(
-        Math.pow(postLat - latNum, 2) +
-        Math.pow(postLng - lngNum, 2)
-      );
+      if (hasTargetLocation) {
+        const distanceKm = getDistanceInKm(postLat, postLng, latNum, lngNum);
 
-      if (distance > 0.01) {
-        return res.status(400).json({
-          message: "Too far from target location",
-        });
+        /* approx 10km radius */
+        if (distanceKm > 10) {
+          return res.status(400).json({
+            message: `Too far from target location (${distanceKm.toFixed(
+              2
+            )} km away)`,
+          });
+        }
+
+        submissionData.distanceKm = distanceKm;
       }
 
       submissionData.post = postId;
+
+      /* 🔥 lock task so others don't see it */
+      post.status = "pending";
+      await post.save();
     }
 
     /* ===============================
@@ -171,7 +210,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      // 🔥 If already taken by someone else
+      /* 🔥 If already taken by someone else */
       const alreadyTaken = await Submission.findOne({
         vehicle: vehicleId,
         status: { $in: ["pending", "approved"] },
@@ -183,7 +222,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      // 🔥 Same user duplicate block
+      /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         vehicle: vehicleId,
         user: req.user._id,
@@ -200,12 +239,15 @@ const createSubmission = async (req, res) => {
 
     const submission = await Submission.create(submissionData);
 
-    res.status(201).json(submission);
+    res.status(201).json({
+      message: "Submission created successfully",
+      submission,
+    });
   } catch (err) {
     console.error("❌ Create submission error:", err);
 
     res.status(500).json({
-      message: err.message,
+      message: err.message || "Server error",
     });
   }
 };
@@ -218,7 +260,7 @@ const getUserSubmissions = async (req, res) => {
     const submissions = await Submission.find({
       user: req.user._id,
     })
-      .populate("post", "carNumber city area rewardAmount photoUrl")
+      .populate("post", "carNumber city area rewardAmount photoUrl status")
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .sort({ createdAt: -1 });
 
@@ -292,7 +334,7 @@ const verifySubmission = async (req, res) => {
     let rewardAmount = 0;
 
     if (status === "approved") {
-      // 🔥 reward only for normal post tasks
+      /* 🔥 reward only for normal post tasks */
       if (submission.post) {
         const post = await Post.findById(submission.post);
 
@@ -302,16 +344,18 @@ const verifySubmission = async (req, res) => {
           });
         }
 
-        rewardAmount = post.rewardAmount || 0;
+        rewardAmount = Number(post.rewardAmount || 0);
         submission.rewardAmount = rewardAmount;
 
-        await creditReward({
-          userId: submission.user,
-          amount: rewardAmount,
-          refId: submission._id.toString(),
-        });
+        if (rewardAmount > 0) {
+          await creditReward({
+            userId: submission.user,
+            amount: rewardAmount,
+            refId: submission._id.toString(),
+          });
+        }
 
-        // 🔥 Optional: task complete mark
+        /* 🔥 mark task complete */
         post.status = "completed";
         await post.save();
 
@@ -324,7 +368,7 @@ const verifySubmission = async (req, res) => {
         }
       }
 
-      // 🔥 lost vehicle task optional reward
+      /* 🔥 lost vehicle task optional reward */
       if (submission.vehicle) {
         if (user?.pushToken) {
           await sendNotification(
@@ -336,12 +380,23 @@ const verifySubmission = async (req, res) => {
       }
     }
 
-    if (status === "rejected" && user?.pushToken) {
-      await sendNotification(
-        user.pushToken,
-        "❌ Submission Rejected",
-        "Your submission was rejected by admin"
-      );
+    if (status === "rejected") {
+      /* 🔥 if rejected, reopen normal post */
+      if (submission.post) {
+        const post = await Post.findById(submission.post);
+        if (post) {
+          post.status = "active";
+          await post.save();
+        }
+      }
+
+      if (user?.pushToken) {
+        await sendNotification(
+          user.pushToken,
+          "❌ Submission Rejected",
+          "Your submission was rejected by admin"
+        );
+      }
     }
 
     await submission.save();
@@ -366,7 +421,7 @@ const verifySubmission = async (req, res) => {
 const getPendingSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({ status: "pending" })
-      .populate("post", "carNumber city area rewardAmount photoUrl")
+      .populate("post", "carNumber city area rewardAmount photoUrl status")
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .populate("user", "email name")
       .sort({ createdAt: -1 });
@@ -386,7 +441,7 @@ const getPendingSubmissions = async (req, res) => {
 const getSubmissionById = async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id)
-      .populate("post", "carNumber city area rewardAmount photoUrl")
+      .populate("post", "carNumber city area rewardAmount photoUrl status")
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .populate("user", "email name");
 
@@ -424,7 +479,7 @@ const getAllSubmissions = async (req, res) => {
     }
 
     const submissions = await Submission.find(query)
-      .populate("post", "carNumber city area rewardAmount photoUrl")
+      .populate("post", "carNumber city area rewardAmount photoUrl status")
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .populate("user", "email name")
       .sort({ createdAt: -1 });
