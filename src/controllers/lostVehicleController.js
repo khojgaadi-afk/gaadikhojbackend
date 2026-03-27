@@ -13,11 +13,16 @@ exports.createLostVehicle = async (req, res) => {
       city,
       area,
       description,
+      platformFee,
+      lat,
+      lng,
     } = req.body;
 
-    if (!vehicleNumber || !vehicleType || !phone) {
+    if (!vehicleNumber || !vehicleType || !phone || !city || !area) {
       return res.status(400).json({
-        message: "vehicleNumber, vehicleType and phone are required",
+        success: false,
+        message:
+          "vehicleNumber, vehicleType, phone, city and area are required",
       });
     }
 
@@ -25,9 +30,14 @@ exports.createLostVehicle = async (req, res) => {
     let photos = [];
 
     if (req.files?.photos) {
-      photos = req.files.photos.map(
-        (f) => `/uploads/${f.filename}`
-      );
+      photos = req.files.photos.map((f) => `/uploads/${f.filename}`);
+    }
+
+    if (!photos.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one vehicle photo is required",
+      });
     }
 
     /* DOCUMENTS */
@@ -43,31 +53,47 @@ exports.createLostVehicle = async (req, res) => {
       ? `/uploads/${req.files.aadhar[0].filename}`
       : null;
 
+    const latNum = lat !== undefined ? Number(lat) : null;
+    const lngNum = lng !== undefined ? Number(lng) : null;
+
     /* CREATE VEHICLE */
     const vehicle = await LostVehicle.create({
-      user: req.user._id, // ✅ FIXED
+      user: req.user._id || req.user.id,
 
-      vehicleNumber,
-      vehicleType,
-      phone,
-      brandModel,
-      city,
-      area,
-      description,
+      vehicleNumber: vehicleNumber.trim().toUpperCase(),
+      vehicleType: vehicleType.trim().toLowerCase(),
+      phone: phone.trim(),
+      brandModel: brandModel?.trim() || "",
+      city: city.trim(),
+      area: area.trim(),
+      description: description?.trim() || "",
+      platformFee: Number(platformFee) || 299,
+
+      location: {
+        lat: isNaN(latNum) ? null : latNum,
+        lng: isNaN(lngNum) ? null : lngNum,
+      },
 
       vehiclePhotos: photos,
 
       rcDocument: rc,
       firDocument: fir,
       aadharDocument: aadhar,
+
+      status: "pending",
     });
 
-    res.status(201).json(vehicle);
+    return res.status(201).json({
+      success: true,
+      message: "Lost vehicle reported successfully",
+      vehicle,
+    });
   } catch (err) {
     console.error("❌ Create lost vehicle error:", err);
 
-    res.status(500).json({
-      message: err.message,
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Server error",
     });
   }
 };
@@ -80,14 +106,18 @@ exports.getLostVehicles = async (req, res) => {
     const vehicles = await LostVehicle.find({
       status: "approved",
     })
-      .populate("user", "name") // optional
+      .populate("user", "name")
       .sort({ createdAt: -1 });
 
-    res.json(vehicles);
+    return res.json({
+      success: true,
+      vehicles,
+    });
   } catch (err) {
     console.error("❌ Get vehicles error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -101,21 +131,25 @@ exports.getPendingLostVehicles = async (req, res) => {
     const vehicles = await LostVehicle.find({
       status: "pending",
     })
-      .populate("user", "name email") // ✅ FIXED
+      .populate("user", "name email")
       .sort({ createdAt: -1 });
 
-    res.json(vehicles);
+    return res.json({
+      success: true,
+      vehicles,
+    });
   } catch (err) {
     console.error("❌ Pending vehicles error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
 };
 
 /* =========================
-   ADMIN VERIFY
+   ADMIN VERIFY / UPDATE STATUS
 ========================= */
 exports.verifyLostVehicle = async (req, res) => {
   try {
@@ -123,6 +157,7 @@ exports.verifyLostVehicle = async (req, res) => {
 
     if (!["approved", "rejected", "found"].includes(status)) {
       return res.status(400).json({
+        success: false,
         message: "Invalid status",
       });
     }
@@ -131,28 +166,55 @@ exports.verifyLostVehicle = async (req, res) => {
 
     if (!vehicle) {
       return res.status(404).json({
+        success: false,
         message: "Vehicle not found",
       });
     }
 
-    if (vehicle.status !== "pending") {
+    /*
+      RULES:
+      pending  -> approved / rejected
+      approved -> found
+    */
+
+    if (vehicle.status === "pending") {
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Pending vehicle can only be approved or rejected",
+        });
+      }
+    }
+
+    if (vehicle.status === "approved") {
+      if (status !== "found") {
+        return res.status(400).json({
+          success: false,
+          message: "Approved vehicle can only be marked as found",
+        });
+      }
+    }
+
+    if (["rejected", "found"].includes(vehicle.status)) {
       return res.status(400).json({
-        message: "Already processed",
+        success: false,
+        message: "Vehicle already finalized",
       });
     }
 
     vehicle.status = status;
-
     await vehicle.save();
 
-    res.json({
-      message: "Vehicle status updated",
+    return res.json({
+      success: true,
+      message: "Vehicle status updated successfully",
       vehicle,
     });
   } catch (err) {
     console.error("❌ Verify vehicle error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }

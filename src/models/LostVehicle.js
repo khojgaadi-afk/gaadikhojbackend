@@ -14,12 +14,15 @@ const lostVehicleSchema = new mongoose.Schema(
       required: true,
       trim: true,
       uppercase: true,
+      index: true,
     },
 
     vehicleType: {
       type: String,
       enum: ["car", "bike", "scooter", "truck"],
       required: true,
+      lowercase: true,
+      trim: true,
     },
 
     location: {
@@ -47,14 +50,16 @@ const lostVehicleSchema = new mongoose.Schema(
 
     city: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
+      index: true,
     },
 
     area: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
+      index: true,
     },
 
     description: {
@@ -72,6 +77,12 @@ const lostVehicleSchema = new mongoose.Schema(
     vehiclePhotos: {
       type: [String],
       default: [],
+      validate: {
+        validator: function (arr) {
+          return Array.isArray(arr) && arr.length > 0;
+        },
+        message: "At least one vehicle photo is required",
+      },
     },
 
     rcDocument: {
@@ -96,7 +107,7 @@ const lostVehicleSchema = new mongoose.Schema(
       index: true,
     },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 module.exports = mongoose.model("LostVehicle", lostVehicleSchema);
