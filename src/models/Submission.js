@@ -2,17 +2,25 @@ const mongoose = require("mongoose");
 
 const submissionSchema = new mongoose.Schema(
   {
-    post: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Post",
-      required: true,
-      index: true,
-    },
-
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
+    },
+
+    post: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Post",
+      default: null,
+      index: true,
+    },
+
+    // ✅ FIXED: lost vehicle task support
+    vehicle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "LostVehicle",
+      default: null,
       index: true,
     },
 
@@ -38,6 +46,11 @@ const submissionSchema = new mongoose.Schema(
       default: null,
     },
 
+    distanceKm: {
+      type: Number,
+      default: null,
+    },
+
     status: {
       type: String,
       enum: ["pending", "approved", "rejected"],
@@ -45,21 +58,21 @@ const submissionSchema = new mongoose.Schema(
       index: true,
     },
 
+    rewardAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     verifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Admin",
       default: null,
     },
 
     verifiedAt: {
       type: Date,
       default: null,
-    },
-
-    rewardAmount: {
-      type: Number,
-      default: 0,
-      min: 0,
     },
   },
   { timestamps: true }
