@@ -46,10 +46,11 @@ const postSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // ✅ FIXED STATUS ENUM
     status: {
       type: String,
-      enum: ["active", "expired"],
-      default: "active",
+      enum: ["pending", "active", "expired"],
+      default: "pending",
       index: true,
     },
 

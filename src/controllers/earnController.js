@@ -15,7 +15,7 @@ const SECOND_BATCH_DELAY_HOURS = 2;
 const resetDailyIfNeeded = (user) => {
   const today = new Date().toDateString();
 
-  if (!user.lastAdDate || user.lastAdDate.toDateString() !== today) {
+  if (!user.lastAdDate || new Date(user.lastAdDate).toDateString() !== today) {
     user.adsWatchedToday = 0;
     user.firstBatchWatched = 0;
     user.secondBatchWatched = 0;
@@ -27,11 +27,11 @@ const resetDailyIfNeeded = (user) => {
 /* =========================
    HELPER: GET STATUS
 ========================= */
-const getAdStatus = (user) => {
+const getAdStatusData = (user) => {
   const now = new Date();
 
   const secondBatchUnlocked =
-    user.secondBatchUnlockAt && now >= user.secondBatchUnlockAt;
+    user.secondBatchUnlockAt && now >= new Date(user.secondBatchUnlockAt);
 
   const firstBatchRemaining = Math.max(
     0,
@@ -52,7 +52,7 @@ const getAdStatus = (user) => {
     secondBatchRemaining,
     totalRemaining,
     secondBatchUnlocked,
-    secondBatchUnlockAt: user.secondBatchUnlockAt,
+    secondBatchUnlockAt: user.secondBatchUnlockAt || null,
   };
 };
 
@@ -61,32 +61,41 @@ const getAdStatus = (user) => {
 ========================= */
 exports.getAdStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id || req.user.id);
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        msg: "User not found",
+        message: "User not found",
       });
     }
+
+    // Safe defaults
+    if (typeof user.adsWatchedToday !== "number") user.adsWatchedToday = 0;
+    if (typeof user.firstBatchWatched !== "number") user.firstBatchWatched = 0;
+    if (typeof user.secondBatchWatched !== "number") user.secondBatchWatched = 0;
+    if (typeof user.streakCount !== "number") user.streakCount = 0;
 
     resetDailyIfNeeded(user);
     await user.save();
 
-    const status = getAdStatus(user);
+    const wallet = await Wallet.findOne({ user: user._id });
+    const status = getAdStatusData(user);
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       adsWatchedToday: user.adsWatchedToday,
       firstBatchWatched: user.firstBatchWatched,
       secondBatchWatched: user.secondBatchWatched,
+      streak: user.streakCount || 0,
+      balance: wallet?.balance || 0,
       ...status,
     });
   } catch (err) {
     console.error("❌ getAdStatus error:", err);
     return res.status(500).json({
       success: false,
-      msg: "Server error",
+      message: "Server error",
       error: err.message,
     });
   }
@@ -100,12 +109,12 @@ exports.watchAd = async (req, res) => {
     /* =========================
        FIND USER
     ========================= */
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id || req.user.id);
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        msg: "User not found",
+        message: "User not found",
       });
     }
 
@@ -128,7 +137,7 @@ exports.watchAd = async (req, res) => {
     if (user.adsWatchedToday >= TOTAL_DAILY_LIMIT) {
       return res.status(400).json({
         success: false,
-        msg: "Daily limit reached",
+        message: "Daily limit reached",
       });
     }
 
@@ -155,16 +164,16 @@ exports.watchAd = async (req, res) => {
 
         return res.status(400).json({
           success: false,
-          msg: "First 10 ads completed. Next 10 will unlock after 2 hours.",
+          message: "First 10 ads completed. Next 10 will unlock after 2 hours.",
           unlockAt: user.secondBatchUnlockAt,
         });
       }
 
       // TIMER RUNNING
-      if (now < user.secondBatchUnlockAt) {
+      if (now < new Date(user.secondBatchUnlockAt)) {
         return res.status(400).json({
           success: false,
-          msg: "Next 10 ads are still locked",
+          message: "Next 10 ads are still locked",
           unlockAt: user.secondBatchUnlockAt,
         });
       }
@@ -178,7 +187,7 @@ exports.watchAd = async (req, res) => {
     if (!currentBatch) {
       return res.status(400).json({
         success: false,
-        msg: "No ads available right now",
+        message: "No ads available right now",
       });
     }
 
@@ -191,7 +200,7 @@ exports.watchAd = async (req, res) => {
 
     if (
       user.lastActiveDate &&
-      user.lastActiveDate.toDateString() === yesterday
+      new Date(user.lastActiveDate).toDateString() === yesterday
     ) {
       user.streakCount += 1;
       reward += user.streakCount;
@@ -255,14 +264,14 @@ exports.watchAd = async (req, res) => {
     await wallet.save();
     await user.save();
 
-    const status = getAdStatus(user);
+    const status = getAdStatusData(user);
 
     /* =========================
        RESPONSE
     ========================= */
-    return res.json({
+    return res.status(200).json({
       success: true,
-      msg: "Reward credited successfully",
+      message: "Reward credited successfully",
       reward,
       batch: currentBatch,
       streak: user.streakCount,
@@ -277,7 +286,7 @@ exports.watchAd = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      msg: "Server error",
+      message: "Server error",
       error: err.message,
     });
   }

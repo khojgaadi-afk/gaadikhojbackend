@@ -33,7 +33,7 @@ const createSubmission = async (req, res) => {
   try {
     const { postId, vehicleId, lat, lng, notes } = req.body;
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id || req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -51,7 +51,7 @@ const createSubmission = async (req, res) => {
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
     const recentSubmissions = await Submission.countDocuments({
-      user: req.user._id,
+      user: user._id,
       createdAt: { $gte: twoMinutesAgo },
     });
 
@@ -112,7 +112,7 @@ const createSubmission = async (req, res) => {
     }
 
     let submissionData = {
-      user: req.user._id,
+      user: user._id,
       photoUrl: photoPath,
       notes: notes || "",
       lat: latNum,
@@ -132,8 +132,8 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 Task must be active */
-      if (post.status && post.status !== "active") {
+      /* 🔥 Task must be active only */
+      if (post.status !== "active") {
         return res.status(400).json({
           message: "This task is no longer active",
         });
@@ -154,7 +154,7 @@ const createSubmission = async (req, res) => {
       /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         post: postId,
-        user: req.user._id,
+        user: user._id,
       });
 
       if (exist) {
@@ -163,8 +163,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 OPTIONAL LOCATION VALIDATION
-         Agar post.location missing hai toh reject mat karo */
+      /* 🔥 OPTIONAL LOCATION VALIDATION */
       const postLat = Number(post.location?.lat);
       const postLng = Number(post.location?.lng);
 
@@ -193,7 +192,7 @@ const createSubmission = async (req, res) => {
 
       submissionData.post = postId;
 
-      /* 🔥 lock task so others don't see it */
+      /* 🔥 lock task so others don't submit */
       post.status = "pending";
       await post.save();
     }
@@ -225,7 +224,7 @@ const createSubmission = async (req, res) => {
       /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         vehicle: vehicleId,
-        user: req.user._id,
+        user: user._id,
       });
 
       if (exist) {
@@ -239,14 +238,16 @@ const createSubmission = async (req, res) => {
 
     const submission = await Submission.create(submissionData);
 
-    res.status(201).json({
+    return res.status(201).json({
+      success: true,
       message: "Submission created successfully",
       submission,
     });
   } catch (err) {
     console.error("❌ Create submission error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: err.message || "Server error",
     });
   }
@@ -258,16 +259,16 @@ const createSubmission = async (req, res) => {
 const getUserSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({
-      user: req.user._id,
+      user: req.user._id || req.user.id,
     })
       .populate("post", "carNumber city area rewardAmount photoUrl status")
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .sort({ createdAt: -1 });
 
-    res.json(submissions);
+    return res.json(submissions);
   } catch (err) {
     console.error("❌ Get user submissions error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
     });
   }
@@ -355,8 +356,8 @@ const verifySubmission = async (req, res) => {
           });
         }
 
-        /* 🔥 mark task complete */
-        post.status = "completed";
+        /* 🔥 mark task expired/finished */
+        post.status = "expired";
         await post.save();
 
         if (user?.pushToken) {
@@ -402,14 +403,16 @@ const verifySubmission = async (req, res) => {
     await submission.save();
     await user.save();
 
-    res.json({
+    return res.json({
+      success: true,
       message: "Submission updated successfully",
       submission,
     });
   } catch (err) {
     console.error("❌ Verify submission error:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -426,10 +429,10 @@ const getPendingSubmissions = async (req, res) => {
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
-    res.json(submissions);
+    return res.json(submissions);
   } catch (err) {
     console.error("❌ Pending submissions error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
     });
   }
@@ -451,10 +454,10 @@ const getSubmissionById = async (req, res) => {
       });
     }
 
-    res.json(submission);
+    return res.json(submission);
   } catch (err) {
     console.error("❌ Get submission by id error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
     });
   }
@@ -484,10 +487,10 @@ const getAllSubmissions = async (req, res) => {
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
-    res.json(submissions);
+    return res.json(submissions);
   } catch (err) {
     console.error("❌ Get all submissions error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
     });
   }
