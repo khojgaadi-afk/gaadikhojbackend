@@ -46,7 +46,6 @@ const postSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // ✅ FIXED STATUS ENUM
     status: {
       type: String,
       enum: ["pending", "active", "expired"],
@@ -56,7 +55,7 @@ const postSchema = new mongoose.Schema(
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Admin", // ✅ FIXED
       default: null,
     },
   },

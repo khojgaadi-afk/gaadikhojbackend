@@ -6,15 +6,18 @@ const {
   getActivePosts,
 } = require("../controllers/postController");
 
-const { protectUser } = require("../middleware/authMiddleware");
+const { protectAdmin } = require("../middleware/authMiddleware");
+const { authorize } = require("../middleware/permissionMiddleware");
+
 const upload = require("../utils/upload");
 
 /* =========================
-   USER CREATE POST
+   ADMIN CREATE POST
 ========================= */
 router.post(
   "/",
-  protectUser,
+  protectAdmin,
+  authorize("posts.manage"),
   upload.single("photo"),
   createPost
 );
