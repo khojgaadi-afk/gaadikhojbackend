@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 
-// ✅ FIXED IMPORT
 const { protectAdmin } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/permissionMiddleware");
 
@@ -9,9 +8,12 @@ const {
   createAdmin,
   getAdmins,
   toggleAdminStatus,
+  updateAdminPermissions, // 🔥 NEW
 } = require("../controllers/adminController");
 
-// Create admin
+/* =========================
+   CREATE ADMIN
+========================= */
 router.post(
   "/",
   protectAdmin,
@@ -19,7 +21,9 @@ router.post(
   createAdmin
 );
 
-// Get all admins
+/* =========================
+   GET ALL ADMINS
+========================= */
 router.get(
   "/",
   protectAdmin,
@@ -27,12 +31,24 @@ router.get(
   getAdmins
 );
 
-// Toggle admin status
+/* =========================
+   TOGGLE STATUS
+========================= */
 router.put(
   "/:id/toggle",
   protectAdmin,
   authorize("admins.manage"),
   toggleAdminStatus
+);
+
+/* =========================
+   UPDATE PERMISSIONS 🔥
+========================= */
+router.put(
+  "/:id/permissions",
+  protectAdmin,
+  authorize("admins.manage"), // ya sirf superadmin agar strict chahiye
+  updateAdminPermissions
 );
 
 module.exports = router;

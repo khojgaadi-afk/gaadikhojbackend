@@ -42,6 +42,48 @@ const adminSchema = new mongoose.Schema(
       index: true,
     },
 
+    /* ==========================
+       ADMIN PERMISSIONS
+    ========================== */
+    permissions: {
+      dashboard: {
+        type: Boolean,
+        default: true,
+      },
+      users: {
+        type: Boolean,
+        default: false,
+      },
+      tasks: {
+        type: Boolean,
+        default: false,
+      },
+      submissions: {
+        type: Boolean,
+        default: false,
+      },
+      reports: {
+        type: Boolean,
+        default: false,
+      },
+      withdrawals: {
+        type: Boolean,
+        default: false,
+      },
+      wallet: {
+        type: Boolean,
+        default: false,
+      },
+      admins: {
+        type: Boolean,
+        default: false,
+      },
+      settings: {
+        type: Boolean,
+        default: false,
+      },
+    },
+
     /* PASSWORD RESET */
     resetToken: {
       type: String,

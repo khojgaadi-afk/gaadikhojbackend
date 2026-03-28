@@ -2,6 +2,51 @@ const mongoose = require("mongoose");
 const Admin = require("../models/Admin");
 
 /* =========================
+   DEFAULT PERMISSIONS
+========================= */
+const getDefaultPermissions = (role) => {
+  if (role === "superadmin") {
+    return {
+      dashboard: true,
+      users: true,
+      tasks: true,
+      submissions: true,
+      reports: true,
+      withdrawals: true,
+      wallet: true,
+      admins: true,
+      settings: true,
+    };
+  }
+
+  if (role === "finance") {
+    return {
+      dashboard: true,
+      users: false,
+      tasks: false,
+      submissions: false,
+      reports: true,
+      withdrawals: true,
+      wallet: true,
+      admins: false,
+      settings: false,
+    };
+  }
+
+  return {
+    dashboard: true,
+    users: true,
+    tasks: true,
+    submissions: true,
+    reports: true,
+    withdrawals: false,
+    wallet: false,
+    admins: false,
+    settings: false,
+  };
+};
+
+/* =========================
    CREATE ADMIN
 ========================= */
 exports.createAdmin = async (req, res) => {
@@ -32,6 +77,7 @@ exports.createAdmin = async (req, res) => {
       email: cleanEmail,
       password,
       role: safeRole,
+      permissions: getDefaultPermissions(safeRole), // 🔥 NEW
     });
 
     res.status(201).json({
@@ -40,6 +86,7 @@ exports.createAdmin = async (req, res) => {
       email: admin.email,
       role: admin.role,
       status: admin.status,
+      permissions: admin.permissions, // 🔥 NEW
       createdAt: admin.createdAt,
     });
   } catch (err) {
@@ -100,6 +147,52 @@ exports.toggleAdminStatus = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Toggle admin error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* =========================
+   UPDATE PERMISSIONS 🔥 NEW
+========================= */
+exports.updateAdminPermissions = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { permissions } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        message: "Invalid admin ID",
+      });
+    }
+
+    const admin = await Admin.findById(id);
+
+    if (!admin) {
+      return res.status(404).json({
+        message: "Admin not found",
+      });
+    }
+
+    // Prevent self permission removal (optional but safe)
+    if (req.admin && admin._id.toString() === req.admin._id.toString()) {
+      return res.status(400).json({
+        message: "You cannot change your own permissions",
+      });
+    }
+
+    admin.permissions = {
+      ...admin.permissions,
+      ...permissions,
+    };
+
+    await admin.save();
+
+    res.json({
+      message: "Permissions updated successfully",
+      permissions: admin.permissions,
+    });
+  } catch (err) {
+    console.error("❌ Update permissions error:", err);
     res.status(500).json({ message: err.message });
   }
 };

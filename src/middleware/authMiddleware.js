@@ -77,7 +77,7 @@ const protectUser = async (req, res, next) => {
 };
 
 /* =========================
-   PROTECT ADMIN
+   PROTECT ADMIN (UPDATED)
 ========================= */
 const protectAdmin = async (req, res, next) => {
   try {
@@ -91,6 +91,7 @@ const protectAdmin = async (req, res, next) => {
 
     const decoded = verifyToken(token);
 
+    // 🔥 IMPORTANT: permissions automatically included
     const admin = await Admin.findById(decoded.id).select("-password");
 
     if (!admin) {
@@ -105,6 +106,7 @@ const protectAdmin = async (req, res, next) => {
       });
     }
 
+    // optional safety (if you add passwordChangedAt later)
     if (
       admin.passwordChangedAt &&
       decoded.iat * 1000 < admin.passwordChangedAt.getTime()
@@ -114,7 +116,11 @@ const protectAdmin = async (req, res, next) => {
       });
     }
 
+    /* =========================
+       ATTACH FULL ADMIN (WITH PERMISSIONS)
+    ========================= */
     req.admin = admin;
+
     next();
   } catch (err) {
     console.error("❌ protectAdmin error:", err.message);
