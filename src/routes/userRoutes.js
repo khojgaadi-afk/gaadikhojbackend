@@ -18,13 +18,14 @@ const {
   getSuspiciousUsers,
   forgotPassword,
   resetPassword,
+  updateProfile,
 } = require("../controllers/userController");
 
 /* =========================
    AUTH ROUTES
 ========================= */
 router.post("/auth/forgot-password", forgotPassword);
-router.post("/auth/reset-password", resetPassword); // keep if controller expects body token
+router.post("/auth/reset-password", resetPassword);
 
 /* =========================
    USER ROUTES
@@ -37,6 +38,8 @@ router.get("/me", protectUser, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+
+router.put("/update-profile", protectUser, updateProfile);
 
 router.get("/leaderboard", getLeaderboard);
 
