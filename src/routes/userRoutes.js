@@ -19,11 +19,17 @@ const {
   forgotPassword,
   resetPassword,
   updateProfile,
+  registerUser,
+  verifyEmailOTP,
+  resendEmailOTP,
 } = require("../controllers/userController");
 
 /* =========================
    AUTH ROUTES
 ========================= */
+router.post("/auth/register", registerUser);
+router.post("/auth/verify-email", verifyEmailOTP);
+router.post("/auth/resend-otp", resendEmailOTP);
 router.post("/auth/forgot-password", forgotPassword);
 router.post("/auth/reset-password", resetPassword);
 

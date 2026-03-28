@@ -114,6 +114,19 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
+    /* EMAIL OTP (REGISTRATION) */
+    emailOTP: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
+    emailOTPExpire: {
+      type: Date,
+      default: null,
+      select: false,
+    },
+
     /* RESET PASSWORD */
     resetOTP: {
       type: String,
@@ -161,7 +174,7 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
-        /* EGG BATCH SYSTEM */
+    /* EGG BATCH SYSTEM */
     firstBatchWatched: {
       type: Number,
       default: 0,
@@ -281,10 +294,7 @@ userSchema.methods.setOTP = function (otp) {
    VERIFY OTP
 ========================== */
 userSchema.methods.verifyOTP = function (enteredOTP) {
-  const hashed = crypto
-    .createHash("sha256")
-    .update(enteredOTP)
-    .digest("hex");
+  const hashed = crypto.createHash("sha256").update(enteredOTP).digest("hex");
 
   return this.resetOTP === hashed && this.otpExpire > Date.now();
 };

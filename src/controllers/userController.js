@@ -1,8 +1,10 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
 const User = require("../models/User");
 const Submission = require("../models/Submission");
 const Wallet = require("../models/Wallet");
 const Reward = require("../models/Reward");
+const sendEmail = require("../utils/sendEmail");
 
 /* ============================
    GET ALL USERS
@@ -141,11 +143,19 @@ exports.forgotPassword = async (req, res) => {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Use model method
     user.setOTP(otp);
     await user.save();
 
-    console.log("🔐 OTP (dev only):", otp);
+    await sendEmail({
+      to: user.email,
+      subject: "Reset your GaadiKhoj password",
+      html: `
+        <h2>GaadiKhoj Password Reset</h2>
+        <p>Your OTP is:</p>
+        <h1>${otp}</h1>
+        <p>Valid for 10 minutes</p>
+      `,
+    });
 
     res.json({
       success: true,
@@ -209,7 +219,6 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // IMPORTANT: plain password set करो, model pre-save hash karega
     user.password = password;
     user.resetOTP = null;
     user.otpExpire = null;
@@ -264,7 +273,6 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // Optional: email duplicate check
     if (email && email !== user.email) {
       const existing = await User.findOne({ email });
       if (existing) {
@@ -290,6 +298,191 @@ exports.updateProfile = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Update profile error:", err);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+/* =========================
+   REGISTER USER + EMAIL OTP
+========================= */
+exports.registerUser = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        message: "All fields are required",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) {
+      return res.status(400).json({ message: "User already exists" });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedOTP = crypto.createHash("sha256").update(otp).digest("hex");
+
+    const user = await User.create({
+      name,
+      email: normalizedEmail,
+      password,
+      isEmailVerified: false,
+      emailOTP: hashedOTP,
+      emailOTPExpire: Date.now() + 10 * 60 * 1000,
+    });
+
+    await sendEmail({
+      to: normalizedEmail,
+      subject: "Verify your GaadiKhoj account",
+      html: `
+        <h2>GaadiKhoj Verification</h2>
+        <p>Your OTP is:</p>
+        <h1>${otp}</h1>
+        <p>Valid for 10 minutes</p>
+      `,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "OTP sent to email",
+      email: user.email,
+    });
+  } catch (err) {
+    console.error("❌ Register error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* =========================
+   VERIFY EMAIL OTP
+========================= */
+exports.verifyEmailOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        message: "Email and OTP are required",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      "+emailOTP +emailOTPExpire"
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        message: "Email already verified",
+      });
+    }
+
+    if (!user.emailOTP || !user.emailOTPExpire) {
+      return res.status(400).json({
+        message: "OTP not requested",
+      });
+    }
+
+    if (user.emailOTPExpire < Date.now()) {
+      return res.status(400).json({
+        message: "OTP expired",
+      });
+    }
+
+    const hashedOTP = crypto.createHash("sha256").update(otp).digest("hex");
+
+    if (user.emailOTP !== hashedOTP) {
+      return res.status(400).json({
+        message: "Invalid OTP",
+      });
+    }
+
+    user.isEmailVerified = true;
+    user.emailOTP = null;
+    user.emailOTPExpire = null;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Email verified successfully",
+    });
+  } catch (err) {
+    console.error("❌ Verify email OTP error:", err);
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+/* =========================
+   RESEND EMAIL OTP
+========================= */
+exports.resendEmailOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await User.findOne({ email: normalizedEmail }).select(
+      "+emailOTP +emailOTPExpire"
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        message: "Email already verified",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const hashedOTP = crypto.createHash("sha256").update(otp).digest("hex");
+
+    user.emailOTP = hashedOTP;
+    user.emailOTPExpire = Date.now() + 10 * 60 * 1000;
+
+    await user.save();
+
+    await sendEmail({
+      to: normalizedEmail,
+      subject: "Your GaadiKhoj verification OTP",
+      html: `
+        <h2>GaadiKhoj Verification</h2>
+        <p>Your new OTP is:</p>
+        <h1>${otp}</h1>
+        <p>Valid for 10 minutes</p>
+      `,
+    });
+
+    res.json({
+      success: true,
+      message: "OTP resent successfully",
+    });
+  } catch (err) {
+    console.error("❌ Resend OTP error:", err);
     res.status(500).json({
       message: "Server error",
     });
