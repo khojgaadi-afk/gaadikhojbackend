@@ -13,7 +13,9 @@ exports.createLostVehicle = async (req, res) => {
       city,
       area,
       description,
-      platformFee,
+      recoveryCharge,
+      paymentOrderId,
+      paymentStatus,
       lat,
       lng,
     } = req.body;
@@ -23,6 +25,14 @@ exports.createLostVehicle = async (req, res) => {
         success: false,
         message:
           "vehicleNumber, vehicleType, phone, city and area are required",
+      });
+    }
+
+    /* PAYMENT CHECK */
+    if (!paymentOrderId || paymentStatus !== "PAID") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment required before reporting vehicle",
       });
     }
 
@@ -67,7 +77,10 @@ exports.createLostVehicle = async (req, res) => {
       city: city.trim(),
       area: area.trim(),
       description: description?.trim() || "",
-      platformFee: Number(platformFee) || 299,
+
+      recoveryCharge: Number(recoveryCharge) || 0,
+      paymentOrderId: paymentOrderId?.trim(),
+      paymentStatus: paymentStatus || "PAID",
 
       location: {
         lat: isNaN(latNum) ? null : latNum,

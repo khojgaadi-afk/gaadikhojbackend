@@ -3,7 +3,7 @@ const User = require("../models/User");
 const { sendNotification } = require("../utils/sendNotification");
 
 /* =========================
-   CREATE NEW POST (ADMIN)
+   CREATE NEW POST
 ========================= */
 exports.createPost = async (req, res) => {
   try {
@@ -26,16 +26,18 @@ exports.createPost = async (req, res) => {
     }
 
     const post = await Post.create({
-      carNumber,
-      city,
-      area,
+      carNumber: carNumber.trim().toUpperCase(),
+      city: city.trim(),
+      area: area.trim(),
       rewardAmount: rewardNum,
       location: {
         lat: isNaN(latNum) ? null : latNum,
         lng: isNaN(lngNum) ? null : lngNum,
       },
       photoUrl: req.file ? `/uploads/${req.file.filename}` : null,
-      createdBy: req.admin._id,
+
+      // ✅ FIXED
+      createdBy: req.user?._id || null,
     });
 
     /* 🔔 GET USERS WITH PUSH TOKEN */
@@ -44,7 +46,7 @@ exports.createPost = async (req, res) => {
       status: "active",
     }).select("pushToken");
 
-    /* 🔔 SEND NOTIFICATIONS (parallel but safe) */
+    /* 🔔 SEND NOTIFICATIONS */
     await Promise.allSettled(
       users.map((user) =>
         sendNotification(

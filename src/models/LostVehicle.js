@@ -19,7 +19,7 @@ const lostVehicleSchema = new mongoose.Schema(
 
     vehicleType: {
       type: String,
-      enum: ["car", "bike", "scooter", "truck"],
+      enum: ["car", "bike", "scooter", "truck", "commercial"],
       required: true,
       lowercase: true,
       trim: true,
@@ -68,10 +68,27 @@ const lostVehicleSchema = new mongoose.Schema(
       trim: true,
     },
 
-    platformFee: {
+    /* =========================
+       PAYMENT FIELDS
+    ========================= */
+    recoveryCharge: {
       type: Number,
-      default: 299,
+      default: 0,
       min: 0,
+    },
+
+    paymentOrderId: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["PENDING", "PAID", "FAILED"],
+      default: "PENDING",
+      index: true,
     },
 
     vehiclePhotos: {
