@@ -82,6 +82,10 @@ const adminSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      analytics: {
+        type: Boolean,
+        default: false,
+      },
     },
 
     /* PASSWORD RESET */

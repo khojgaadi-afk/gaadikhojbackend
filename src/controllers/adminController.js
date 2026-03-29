@@ -8,6 +8,7 @@ const getDefaultPermissions = (role) => {
   if (role === "superadmin") {
     return {
       dashboard: true,
+      analytics: true,
       users: true,
       tasks: true,
       submissions: true,
@@ -22,6 +23,7 @@ const getDefaultPermissions = (role) => {
   if (role === "finance") {
     return {
       dashboard: true,
+      analytics: true,
       users: false,
       tasks: false,
       submissions: false,
@@ -35,6 +37,7 @@ const getDefaultPermissions = (role) => {
 
   return {
     dashboard: true,
+    analytics: true,
     users: true,
     tasks: true,
     submissions: true,
@@ -77,7 +80,7 @@ exports.createAdmin = async (req, res) => {
       email: cleanEmail,
       password,
       role: safeRole,
-      permissions: getDefaultPermissions(safeRole), // 🔥 NEW
+      permissions: getDefaultPermissions(safeRole),
     });
 
     res.status(201).json({
@@ -86,7 +89,7 @@ exports.createAdmin = async (req, res) => {
       email: admin.email,
       role: admin.role,
       status: admin.status,
-      permissions: admin.permissions, // 🔥 NEW
+      permissions: admin.permissions,
       createdAt: admin.createdAt,
     });
   } catch (err) {
@@ -152,7 +155,7 @@ exports.toggleAdminStatus = async (req, res) => {
 };
 
 /* =========================
-   UPDATE PERMISSIONS 🔥 NEW
+   UPDATE PERMISSIONS
 ========================= */
 exports.updateAdminPermissions = async (req, res) => {
   try {
@@ -173,7 +176,7 @@ exports.updateAdminPermissions = async (req, res) => {
       });
     }
 
-    // Prevent self permission removal (optional but safe)
+    // Prevent self permission removal
     if (req.admin && admin._id.toString() === req.admin._id.toString()) {
       return res.status(400).json({
         message: "You cannot change your own permissions",
