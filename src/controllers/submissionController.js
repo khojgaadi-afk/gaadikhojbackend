@@ -29,7 +29,10 @@ const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
-const uploadBufferToCloudinary = (fileBuffer, folder = "gaadikhoj/submissions") => {
+const uploadBufferToCloudinary = (
+  fileBuffer,
+  folder = "gaadikhoj/submissions"
+) => {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
@@ -57,12 +60,14 @@ const createSubmission = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
+        success: false,
         message: "User not found",
       });
     }
 
     if (typeof user.trustScore === "number" && user.trustScore < 1) {
       return res.status(403).json({
+        success: false,
         message: "Your account is restricted due to low trust score",
       });
     }
@@ -84,24 +89,28 @@ const createSubmission = async (req, res) => {
       await user.save();
 
       return res.status(429).json({
+        success: false,
         message: "Too many submissions. Suspicious activity detected.",
       });
     }
 
     if (!req.file) {
       return res.status(400).json({
+        success: false,
         message: "Photo required",
       });
     }
 
     if (!postId && !vehicleId) {
       return res.status(400).json({
+        success: false,
         message: "Task ID is required",
       });
     }
 
     if (postId && vehicleId) {
       return res.status(400).json({
+        success: false,
         message: "Provide either postId or vehicleId, not both",
       });
     }
@@ -111,38 +120,13 @@ const createSubmission = async (req, res) => {
 
     if (isNaN(latNum) || isNaN(lngNum)) {
       return res.status(400).json({
+        success: false,
         message: "Invalid location coordinates",
-      });
-    }
-
-    // 🔥 Upload to Cloudinary
-    const uploadedImage = await uploadBufferToCloudinary(req.file.buffer);
-    const photoPath = uploadedImage.secure_url;
-
-    console.log("📸 Cloudinary URL:", photoPath);
-
-    // Duplicate URL check (basic)
-    const duplicatePhoto = await Submission.findOne({
-      photoUrl: photoPath,
-    });
-
-    if (duplicatePhoto) {
-      user.suspiciousCount = (user.suspiciousCount || 0) + 1;
-
-      if (user.suspiciousCount >= 3) {
-        user.isSuspicious = true;
-      }
-
-      await user.save();
-
-      return res.status(400).json({
-        message: "Duplicate photo detected",
       });
     }
 
     let submissionData = {
       user: user._id,
-      photoUrl: photoPath, // ✅ full Cloudinary URL
       notes: notes || "",
       lat: latNum,
       lng: lngNum,
@@ -157,12 +141,14 @@ const createSubmission = async (req, res) => {
 
       if (!post) {
         return res.status(404).json({
+          success: false,
           message: "Post not found",
         });
       }
 
       if (post.status !== "active") {
         return res.status(400).json({
+          success: false,
           message: "This task is no longer active",
         });
       }
@@ -174,6 +160,7 @@ const createSubmission = async (req, res) => {
 
       if (alreadyTaken) {
         return res.status(400).json({
+          success: false,
           message: "This task is already submitted by another user",
         });
       }
@@ -185,6 +172,7 @@ const createSubmission = async (req, res) => {
 
       if (exist) {
         return res.status(400).json({
+          success: false,
           message: "You already submitted this task",
         });
       }
@@ -205,6 +193,7 @@ const createSubmission = async (req, res) => {
 
         if (distanceKm > 10) {
           return res.status(400).json({
+            success: false,
             message: `Too far from target location (${distanceKm.toFixed(
               2
             )} km away)`,
@@ -216,6 +205,7 @@ const createSubmission = async (req, res) => {
 
       submissionData.post = postId;
 
+      // 🔥 lock task until admin verifies
       post.status = "pending";
       await post.save();
     }
@@ -228,6 +218,7 @@ const createSubmission = async (req, res) => {
 
       if (!vehicle) {
         return res.status(404).json({
+          success: false,
           message: "Vehicle not found",
         });
       }
@@ -239,6 +230,7 @@ const createSubmission = async (req, res) => {
 
       if (alreadyTaken) {
         return res.status(400).json({
+          success: false,
           message: "This vehicle task is already submitted by another user",
         });
       }
@@ -250,12 +242,29 @@ const createSubmission = async (req, res) => {
 
       if (exist) {
         return res.status(400).json({
+          success: false,
           message: "You already submitted this vehicle task",
         });
       }
 
       submissionData.vehicle = vehicleId;
     }
+
+    /* ===============================
+       UPLOAD TO CLOUDINARY (LAST STEP)
+    ================================ */
+    let uploadedImage;
+    try {
+      uploadedImage = await uploadBufferToCloudinary(req.file.buffer);
+    } catch (uploadErr) {
+      console.error("❌ Cloudinary upload failed:", uploadErr);
+      return res.status(500).json({
+        success: false,
+        message: "Image upload failed. Please try again.",
+      });
+    }
+
+    submissionData.photoUrl = uploadedImage.secure_url;
 
     const submission = await Submission.create(submissionData);
 
@@ -290,6 +299,7 @@ const getUserSubmissions = async (req, res) => {
   } catch (err) {
     console.error("❌ Get user submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -304,6 +314,7 @@ const verifySubmission = async (req, res) => {
 
     if (!["approved", "rejected"].includes(status)) {
       return res.status(400).json({
+        success: false,
         message: "Invalid status",
       });
     }
@@ -312,12 +323,14 @@ const verifySubmission = async (req, res) => {
 
     if (!submission) {
       return res.status(404).json({
+        success: false,
         message: "Submission not found",
       });
     }
 
     if (submission.status !== "pending") {
       return res.status(400).json({
+        success: false,
         message: "Submission already processed",
       });
     }
@@ -330,6 +343,7 @@ const verifySubmission = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({
+        success: false,
         message: "User not found",
       });
     }
@@ -361,6 +375,7 @@ const verifySubmission = async (req, res) => {
 
         if (!post) {
           return res.status(404).json({
+            success: false,
             message: "Post not found",
           });
         }
@@ -450,6 +465,7 @@ const getPendingSubmissions = async (req, res) => {
   } catch (err) {
     console.error("❌ Pending submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -467,6 +483,7 @@ const getSubmissionById = async (req, res) => {
 
     if (!submission) {
       return res.status(404).json({
+        success: false,
         message: "Submission not found",
       });
     }
@@ -475,6 +492,7 @@ const getSubmissionById = async (req, res) => {
   } catch (err) {
     console.error("❌ Get submission by id error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -508,6 +526,7 @@ const getAllSubmissions = async (req, res) => {
   } catch (err) {
     console.error("❌ Get all submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
