@@ -5,6 +5,9 @@ const User = require("../models/User");
 const { creditReward } = require("../services/rewardService");
 const { sendNotification } = require("../utils/sendNotification");
 
+const cloudinary = require("../config/cloudinary");
+const streamifier = require("streamifier");
+
 /* ===============================
    HELPERS
 ================================ */
@@ -26,6 +29,23 @@ const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
+const uploadBufferToCloudinary = (fileBuffer, folder = "gaadikhoj/submissions") => {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+
+    streamifier.createReadStream(fileBuffer).pipe(stream);
+  });
+};
+
 /* ===============================
    USER SUBMITS PROOF
 ================================ */
@@ -41,7 +61,6 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    /* 🔥 Trust score safe check */
     if (typeof user.trustScore === "number" && user.trustScore < 1) {
       return res.status(403).json({
         message: "Your account is restricted due to low trust score",
@@ -81,6 +100,12 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    if (postId && vehicleId) {
+      return res.status(400).json({
+        message: "Provide either postId or vehicleId, not both",
+      });
+    }
+
     const latNum = Number(lat);
     const lngNum = Number(lng);
 
@@ -90,9 +115,13 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    const photoPath = `/uploads/${req.file.filename}`;
+    // 🔥 Upload to Cloudinary
+    const uploadedImage = await uploadBufferToCloudinary(req.file.buffer);
+    const photoPath = uploadedImage.secure_url;
 
-    /* 🔥 Duplicate image safe check */
+    console.log("📸 Cloudinary URL:", photoPath);
+
+    // Duplicate URL check (basic)
     const duplicatePhoto = await Submission.findOne({
       photoUrl: photoPath,
     });
@@ -113,7 +142,7 @@ const createSubmission = async (req, res) => {
 
     let submissionData = {
       user: user._id,
-      photoUrl: photoPath,
+      photoUrl: photoPath, // ✅ full Cloudinary URL
       notes: notes || "",
       lat: latNum,
       lng: lngNum,
@@ -132,14 +161,12 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 Task must be active only */
       if (post.status !== "active") {
         return res.status(400).json({
           message: "This task is no longer active",
         });
       }
 
-      /* 🔥 If already taken by someone else */
       const alreadyTaken = await Submission.findOne({
         post: postId,
         status: { $in: ["pending", "approved"] },
@@ -151,7 +178,6 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         post: postId,
         user: user._id,
@@ -163,7 +189,6 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 OPTIONAL LOCATION VALIDATION */
       const postLat = Number(post.location?.lat);
       const postLng = Number(post.location?.lng);
 
@@ -178,7 +203,6 @@ const createSubmission = async (req, res) => {
       if (hasTargetLocation) {
         const distanceKm = getDistanceInKm(postLat, postLng, latNum, lngNum);
 
-        /* approx 10km radius */
         if (distanceKm > 10) {
           return res.status(400).json({
             message: `Too far from target location (${distanceKm.toFixed(
@@ -192,7 +216,6 @@ const createSubmission = async (req, res) => {
 
       submissionData.post = postId;
 
-      /* 🔥 lock task so others don't submit */
       post.status = "pending";
       await post.save();
     }
@@ -209,7 +232,6 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 If already taken by someone else */
       const alreadyTaken = await Submission.findOne({
         vehicle: vehicleId,
         status: { $in: ["pending", "approved"] },
@@ -221,7 +243,6 @@ const createSubmission = async (req, res) => {
         });
       }
 
-      /* 🔥 Same user duplicate block */
       const exist = await Submission.findOne({
         vehicle: vehicleId,
         user: user._id,
@@ -335,7 +356,6 @@ const verifySubmission = async (req, res) => {
     let rewardAmount = 0;
 
     if (status === "approved") {
-      /* 🔥 reward only for normal post tasks */
       if (submission.post) {
         const post = await Post.findById(submission.post);
 
@@ -356,7 +376,6 @@ const verifySubmission = async (req, res) => {
           });
         }
 
-        /* 🔥 mark task expired/finished */
         post.status = "expired";
         await post.save();
 
@@ -369,7 +388,6 @@ const verifySubmission = async (req, res) => {
         }
       }
 
-      /* 🔥 lost vehicle task optional reward */
       if (submission.vehicle) {
         if (user?.pushToken) {
           await sendNotification(
@@ -382,7 +400,6 @@ const verifySubmission = async (req, res) => {
     }
 
     if (status === "rejected") {
-      /* 🔥 if rejected, reopen normal post */
       if (submission.post) {
         const post = await Post.findById(submission.post);
         if (post) {

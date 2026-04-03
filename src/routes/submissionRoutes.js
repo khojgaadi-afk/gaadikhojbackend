@@ -1,7 +1,10 @@
 const express = require("express");
 const router = express.Router();
 
-const upload = require("../utils/upload");
+/* =========================
+   MIDDLEWARES
+========================= */
+const upload = require("../middleware/uploadMiddleware"); // ✅ NEW (Cloudinary memory upload)
 
 const {
   createSubmission,
@@ -22,20 +25,25 @@ const { authorize } = require("../middleware/permissionMiddleware");
 /* =========================
    USER ROUTES
 ========================= */
+
+// 🔥 CREATE SUBMISSION (PHOTO UPLOAD)
 router.post(
   "/",
   protectUser,
-  upload.single("photo"),
+  upload.single("photo"), // ⚠️ IMPORTANT: field name MUST be "photo"
   createSubmission
 );
 
+// 🔥 GET USER SUBMISSIONS
 router.get("/user", protectUser, getUserSubmissions);
 
 /* =========================
    ADMIN ROUTES
 ========================= */
 
-// 🔥 IMPORTANT: specific routes first
+// ⚠️ IMPORTANT: Specific routes FIRST
+
+// 🔥 GET PENDING SUBMISSIONS
 router.get(
   "/pending",
   protectAdmin,
@@ -43,6 +51,7 @@ router.get(
   getPendingSubmissions
 );
 
+// 🔥 GET ALL SUBMISSIONS
 router.get(
   "/",
   protectAdmin,
@@ -50,6 +59,7 @@ router.get(
   getAllSubmissions
 );
 
+// 🔥 VERIFY (APPROVE / REJECT)
 router.put(
   "/:id/verify",
   protectAdmin,
@@ -57,6 +67,7 @@ router.put(
   verifySubmission
 );
 
+// 🔥 GET SINGLE SUBMISSION
 router.get(
   "/:id",
   protectAdmin,

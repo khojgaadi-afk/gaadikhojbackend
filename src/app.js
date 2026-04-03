@@ -4,7 +4,6 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const compression = require("compression");
-const path = require("path");
 
 const app = express();
 
@@ -20,7 +19,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: false,
-  }),
+  })
 );
 
 /* =========================
@@ -71,19 +70,14 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL || "*",
     credentials: true,
-  }),
+  })
 );
 
 /* =========================
-   BODY
+   BODY PARSER
 ========================= */
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-
-/* =========================
-   STATIC
-========================= */
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 /* =========================
    ROUTES IMPORT
@@ -103,6 +97,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const earnRoutes = require("./routes/earnRoutes");
 const taskRoutes = require("./routes/taskRoutes");
+
 /* =========================
    ROOT / HEALTH
 ========================= */
@@ -122,13 +117,13 @@ app.get("/api/health", (req, res) => {
 });
 
 /* =========================
-   AUTH
+   AUTH ROUTES
 ========================= */
 app.use("/api/admin/auth", authLimiter, authRoutes);
 app.use("/api/users/auth", authLimiter, userAuthRoutes);
 
 /* =========================
-   CORE
+   CORE ROUTES
 ========================= */
 app.use("/api/posts", postRoutes);
 app.use("/api/submissions", submissionRoutes);
@@ -139,7 +134,7 @@ app.use("/api/withdrawals", withdrawalRoutes);
 app.use("/api/admins", adminRoutes);
 
 /* =========================
-   EXTRA
+   EXTRA ROUTES
 ========================= */
 app.use("/api/audit", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
@@ -147,7 +142,6 @@ app.use("/api/lost-vehicles", lostVehicleRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/earn", earnRoutes);
 app.use("/api/tasks", taskRoutes);
-
 
 /* =========================
    404 HANDLER
