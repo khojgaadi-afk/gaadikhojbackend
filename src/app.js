@@ -4,7 +4,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const compression = require("compression");
-const path = require("path"); // 🔥 IMPORTANT
+const path = require("path");
 
 const app = express();
 
@@ -20,7 +20,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: false,
-  })
+  }),
 );
 
 /* =========================
@@ -71,17 +71,17 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL || "*",
     credentials: true,
-  })
+  }),
 );
 
 /* =========================
-   BODY PARSER
+   BODY
 ========================= */
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 /* =========================
-   🔥 LOCAL UPLOADS SERVE
+   STATIC
 ========================= */
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
@@ -103,7 +103,6 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const earnRoutes = require("./routes/earnRoutes");
 const taskRoutes = require("./routes/taskRoutes");
-
 /* =========================
    ROOT / HEALTH
 ========================= */
@@ -123,13 +122,13 @@ app.get("/api/health", (req, res) => {
 });
 
 /* =========================
-   AUTH ROUTES
+   AUTH
 ========================= */
 app.use("/api/admin/auth", authLimiter, authRoutes);
 app.use("/api/users/auth", authLimiter, userAuthRoutes);
 
 /* =========================
-   CORE ROUTES
+   CORE
 ========================= */
 app.use("/api/posts", postRoutes);
 app.use("/api/submissions", submissionRoutes);
@@ -140,7 +139,7 @@ app.use("/api/withdrawals", withdrawalRoutes);
 app.use("/api/admins", adminRoutes);
 
 /* =========================
-   EXTRA ROUTES
+   EXTRA
 ========================= */
 app.use("/api/audit", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
@@ -148,6 +147,7 @@ app.use("/api/lost-vehicles", lostVehicleRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/earn", earnRoutes);
 app.use("/api/tasks", taskRoutes);
+
 
 /* =========================
    404 HANDLER
@@ -168,6 +168,7 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
+    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
   });
 });
 
