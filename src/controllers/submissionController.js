@@ -1,3 +1,7 @@
+const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
+
 const Submission = require("../models/Submission");
 const Post = require("../models/Post");
 const LostVehicle = require("../models/LostVehicle");
@@ -11,7 +15,7 @@ const { sendNotification } = require("../utils/sendNotification");
 const toRad = (value) => (value * Math.PI) / 180;
 
 const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
-  const R = 6371; // km
+  const R = 6371;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
 
@@ -26,24 +30,133 @@ const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
+const cleanupUploadedFile = (filename) => {
+  if (!filename) return;
+  try {
+    const filePath = path.join(__dirname, "../../uploads", filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (err) {
+    console.error("❌ File cleanup error:", err.message);
+  }
+};
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const safeAbort = async (session) => {
+  try {
+    if (session?.inTransaction()) {
+      await session.abortTransaction();
+    }
+  } catch (_) {}
+};
+
+const safeEnd = (session) => {
+  try {
+    session?.endSession();
+  } catch (_) {}
+};
+
 /* ===============================
    USER SUBMITS PROOF
 ================================ */
 const createSubmission = async (req, res) => {
-  try {
-    const { postId, vehicleId, lat, lng, notes } = req.body;
+  const session = await mongoose.startSession();
 
-    const user = await User.findById(req.user._id || req.user.id);
+  try {
+    session.startTransaction();
+
+    const { postId, vehicleId, lat, lng, notes } = req.body;
+    const userId = req.user._id || req.user.id;
+
+    if (!req.file) {
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(400).json({
+        success: false,
+        message: "Photo required",
+      });
+    }
+
+    if ((postId && vehicleId) || (!postId && !vehicleId)) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(400).json({
+        success: false,
+        message: "Provide either postId or vehicleId, not both",
+      });
+    }
+
+    if (postId && !isValidObjectId(postId)) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid post ID",
+      });
+    }
+
+    if (vehicleId && !isValidObjectId(vehicleId)) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid vehicle ID",
+      });
+    }
+
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+
+    if (
+      Number.isNaN(latNum) ||
+      Number.isNaN(lngNum) ||
+      latNum < -90 ||
+      latNum > 90 ||
+      lngNum < -180 ||
+      lngNum > 180
+    ) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid location coordinates",
+      });
+    }
+
+    const user = await User.findById(userId).session(session);
 
     if (!user) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
       return res.status(404).json({
+        success: false,
         message: "User not found",
       });
     }
 
-    /* 🔥 Trust score safe check */
-    if (typeof user.trustScore === "number" && user.trustScore < 1) {
+    if (user.isSuspicious) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
       return res.status(403).json({
+        success: false,
+        message: "Your account is under review",
+      });
+    }
+
+    if (typeof user.trustScore === "number" && user.trustScore < 1) {
+      cleanupUploadedFile(req.file.filename);
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(403).json({
+        success: false,
         message: "Your account is restricted due to low trust score",
       });
     }
@@ -53,68 +166,32 @@ const createSubmission = async (req, res) => {
     const recentSubmissions = await Submission.countDocuments({
       user: user._id,
       createdAt: { $gte: twoMinutesAgo },
-    });
+    }).session(session);
 
     if (recentSubmissions >= 5) {
       user.suspiciousCount = (user.suspiciousCount || 0) + 1;
-
       if (user.suspiciousCount >= 3) {
         user.isSuspicious = true;
       }
 
-      await user.save();
+      await user.save({ session });
+
+      cleanupUploadedFile(req.file.filename);
+      await session.commitTransaction();
+      safeEnd(session);
 
       return res.status(429).json({
+        success: false,
         message: "Too many submissions. Suspicious activity detected.",
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({
-        message: "Photo required",
-      });
-    }
-
-    if (!postId && !vehicleId) {
-      return res.status(400).json({
-        message: "Task ID is required",
-      });
-    }
-
-    const latNum = Number(lat);
-    const lngNum = Number(lng);
-
-    if (isNaN(latNum) || isNaN(lngNum)) {
-      return res.status(400).json({
-        message: "Invalid location coordinates",
       });
     }
 
     const photoPath = `/uploads/${req.file.filename}`;
 
-    /* 🔥 Duplicate image safe check */
-    const duplicatePhoto = await Submission.findOne({
-      photoUrl: photoPath,
-    });
-
-    if (duplicatePhoto) {
-      user.suspiciousCount = (user.suspiciousCount || 0) + 1;
-
-      if (user.suspiciousCount >= 3) {
-        user.isSuspicious = true;
-      }
-
-      await user.save();
-
-      return res.status(400).json({
-        message: "Duplicate photo detected",
-      });
-    }
-
-    let submissionData = {
+    const submissionData = {
       user: user._id,
       photoUrl: photoPath,
-      notes: notes || "",
+      notes: typeof notes === "string" ? notes.trim().slice(0, 500) : "",
       lat: latNum,
       lng: lngNum,
       status: "pending",
@@ -124,46 +201,40 @@ const createSubmission = async (req, res) => {
        NORMAL POST TASK
     ================================ */
     if (postId) {
-      const post = await Post.findById(postId);
+      const post = await Post.findOneAndUpdate(
+        { _id: postId, status: "active" },
+        { $set: { status: "pending" } },
+        { new: true, session }
+      );
 
       if (!post) {
-        return res.status(404).json({
-          message: "Post not found",
-        });
-      }
-
-      /* 🔥 Task must be active only */
-      if (post.status !== "active") {
+        cleanupUploadedFile(req.file.filename);
+        await safeAbort(session);
+        safeEnd(session);
         return res.status(400).json({
-          message: "This task is no longer active",
+          success: false,
+          message: "This task is no longer available",
         });
       }
 
-      /* 🔥 If already taken by someone else */
-      const alreadyTaken = await Submission.findOne({
-        post: postId,
-        status: { $in: ["pending", "approved"] },
-      });
-
-      if (alreadyTaken) {
-        return res.status(400).json({
-          message: "This task is already submitted by another user",
-        });
-      }
-
-      /* 🔥 Same user duplicate block */
-      const exist = await Submission.findOne({
+      const existingUserSubmission = await Submission.findOne({
         post: postId,
         user: user._id,
-      });
+      }).session(session);
 
-      if (exist) {
+      if (existingUserSubmission) {
+        post.status = "active";
+        await post.save({ session });
+
+        cleanupUploadedFile(req.file.filename);
+        await safeAbort(session);
+        safeEnd(session);
         return res.status(400).json({
+          success: false,
           message: "You already submitted this task",
         });
       }
 
-      /* 🔥 OPTIONAL LOCATION VALIDATION */
       const postLat = Number(post.location?.lat);
       const postLng = Number(post.location?.lng);
 
@@ -172,18 +243,22 @@ const createSubmission = async (req, res) => {
         post.location?.lat !== null &&
         post.location?.lng !== undefined &&
         post.location?.lng !== null &&
-        !isNaN(postLat) &&
-        !isNaN(postLng);
+        !Number.isNaN(postLat) &&
+        !Number.isNaN(postLng);
 
       if (hasTargetLocation) {
         const distanceKm = getDistanceInKm(postLat, postLng, latNum, lngNum);
 
-        /* approx 10km radius */
         if (distanceKm > 10) {
+          post.status = "active";
+          await post.save({ session });
+
+          cleanupUploadedFile(req.file.filename);
+          await safeAbort(session);
+          safeEnd(session);
           return res.status(400).json({
-            message: `Too far from target location (${distanceKm.toFixed(
-              2
-            )} km away)`,
+            success: false,
+            message: `Too far from target location (${distanceKm.toFixed(2)} km away)`,
           });
         }
 
@@ -191,52 +266,61 @@ const createSubmission = async (req, res) => {
       }
 
       submissionData.post = postId;
-
-      /* 🔥 lock task so others don't submit */
-      post.status = "pending";
-      await post.save();
     }
 
     /* ===============================
        LOST VEHICLE TASK
     ================================ */
     if (vehicleId) {
-      const vehicle = await LostVehicle.findById(vehicleId);
+      const vehicle = await LostVehicle.findById(vehicleId).session(session);
 
       if (!vehicle) {
+        cleanupUploadedFile(req.file.filename);
+        await safeAbort(session);
+        safeEnd(session);
         return res.status(404).json({
+          success: false,
           message: "Vehicle not found",
         });
       }
 
-      /* 🔥 If already taken by someone else */
-      const alreadyTaken = await Submission.findOne({
+      const existingUserSubmission = await Submission.findOne({
         vehicle: vehicleId,
-        status: { $in: ["pending", "approved"] },
-      });
+        user: user._id,
+      }).session(session);
 
-      if (alreadyTaken) {
+      if (existingUserSubmission) {
+        cleanupUploadedFile(req.file.filename);
+        await safeAbort(session);
+        safeEnd(session);
         return res.status(400).json({
-          message: "This vehicle task is already submitted by another user",
+          success: false,
+          message: "You already submitted this vehicle task",
         });
       }
 
-      /* 🔥 Same user duplicate block */
-      const exist = await Submission.findOne({
+      const alreadyTaken = await Submission.findOne({
         vehicle: vehicleId,
-        user: user._id,
-      });
+        status: { $in: ["pending", "approved"] },
+      }).session(session);
 
-      if (exist) {
+      if (alreadyTaken) {
+        cleanupUploadedFile(req.file.filename);
+        await safeAbort(session);
+        safeEnd(session);
         return res.status(400).json({
-          message: "You already submitted this vehicle task",
+          success: false,
+          message: "This vehicle task is already submitted by another user",
         });
       }
 
       submissionData.vehicle = vehicleId;
     }
 
-    const submission = await Submission.create(submissionData);
+    const [submission] = await Submission.create([submissionData], { session });
+
+    await session.commitTransaction();
+    safeEnd(session);
 
     return res.status(201).json({
       success: true,
@@ -244,6 +328,10 @@ const createSubmission = async (req, res) => {
       submission,
     });
   } catch (err) {
+    cleanupUploadedFile(req.file?.filename);
+    await safeAbort(session);
+    safeEnd(session);
+
     console.error("❌ Create submission error:", err);
 
     return res.status(500).json({
@@ -265,10 +353,14 @@ const getUserSubmissions = async (req, res) => {
       .populate("vehicle", "vehicleNumber city area vehiclePhotos")
       .sort({ createdAt: -1 });
 
-    return res.json(submissions);
+    return res.json({
+      success: true,
+      submissions,
+    });
   } catch (err) {
     console.error("❌ Get user submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -278,37 +370,50 @@ const getUserSubmissions = async (req, res) => {
    ADMIN VERIFY SUBMISSION
 ================================ */
 const verifySubmission = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
+    session.startTransaction();
+
     const { status } = req.body;
 
     if (!["approved", "rejected"].includes(status)) {
+      await safeAbort(session);
+      safeEnd(session);
       return res.status(400).json({
+        success: false,
         message: "Invalid status",
       });
     }
 
-    const submission = await Submission.findById(req.params.id);
+    const submission = await Submission.findOneAndUpdate(
+      { _id: req.params.id, status: "pending" },
+      {
+        $set: {
+          status,
+          verifiedBy: req.admin._id,
+          verifiedAt: new Date(),
+        },
+      },
+      { new: true, session }
+    );
 
     if (!submission) {
-      return res.status(404).json({
-        message: "Submission not found",
-      });
-    }
-
-    if (submission.status !== "pending") {
+      await safeAbort(session);
+      safeEnd(session);
       return res.status(400).json({
-        message: "Submission already processed",
+        success: false,
+        message: "Submission already processed or not found",
       });
     }
 
-    submission.status = status;
-    submission.verifiedBy = req.admin._id;
-    submission.verifiedAt = new Date();
-
-    const user = await User.findById(submission.user);
+    const user = await User.findById(submission.user).session(session);
 
     if (!user) {
+      await safeAbort(session);
+      safeEnd(session);
       return res.status(404).json({
+        success: false,
         message: "User not found",
       });
     }
@@ -316,50 +421,61 @@ const verifySubmission = async (req, res) => {
     user.approvedSubmissions = user.approvedSubmissions || 0;
     user.rejectedSubmissions = user.rejectedSubmissions || 0;
 
-    if (status === "approved") {
-      user.approvedSubmissions += 1;
-    }
-
-    if (status === "rejected") {
-      user.rejectedSubmissions += 1;
-    }
+    if (status === "approved") user.approvedSubmissions += 1;
+    if (status === "rejected") user.rejectedSubmissions += 1;
 
     const total = user.approvedSubmissions + user.rejectedSubmissions;
 
-    if (total > 0) {
+    if (total >= 10) {
       user.trustScore = Number(
-        ((user.approvedSubmissions / total) * 5).toFixed(2)
+        (((user.approvedSubmissions + 1) / (total + 2)) * 5).toFixed(2)
       );
     }
 
     let rewardAmount = 0;
 
-    if (status === "approved") {
-      /* 🔥 reward only for normal post tasks */
-      if (submission.post) {
-        const post = await Post.findById(submission.post);
+    /* ===============================
+       APPROVED - POST TASK
+    ================================ */
+    if (status === "approved" && submission.post) {
+      const post = await Post.findById(submission.post).session(session);
 
-        if (!post) {
-          return res.status(404).json({
-            message: "Post not found",
-          });
-        }
+      if (!post) {
+        await safeAbort(session);
+        safeEnd(session);
+        return res.status(404).json({
+          success: false,
+          message: "Post not found",
+        });
+      }
 
-        rewardAmount = Number(post.rewardAmount || 0);
-        submission.rewardAmount = rewardAmount;
+      rewardAmount = Number(Number(post.rewardAmount || 0).toFixed(2));
+      submission.rewardAmount = rewardAmount;
+      post.status = "expired";
 
+      await post.save({ session });
+      await submission.save({ session });
+      await user.save({ session });
+
+      await session.commitTransaction();
+      safeEnd(session);
+
+      /* Reward after DB commit */
+      try {
         if (rewardAmount > 0) {
           await creditReward({
             userId: submission.user,
             amount: rewardAmount,
-            refId: submission._id.toString(),
+            refId: submission._id,
+            source: "submission",
           });
         }
+      } catch (rewardErr) {
+        console.error("❌ Reward credit failed after approval:", rewardErr.message);
+      }
 
-        /* 🔥 mark task expired/finished */
-        post.status = "expired";
-        await post.save();
-
+      /* Notification */
+      try {
         if (user?.pushToken) {
           await sendNotification(
             user.pushToken,
@@ -367,10 +483,28 @@ const verifySubmission = async (req, res) => {
             `You earned ₹${rewardAmount} for finding vehicle`
           );
         }
+      } catch (notifyErr) {
+        console.error("❌ Notification failed:", notifyErr.message);
       }
 
-      /* 🔥 lost vehicle task optional reward */
-      if (submission.vehicle) {
+      return res.json({
+        success: true,
+        message: "Submission approved successfully",
+        submission,
+      });
+    }
+
+    /* ===============================
+       APPROVED - LOST VEHICLE TASK
+    ================================ */
+    if (status === "approved" && submission.vehicle) {
+      await user.save({ session });
+      await submission.save({ session });
+
+      await session.commitTransaction();
+      safeEnd(session);
+
+      try {
         if (user?.pushToken) {
           await sendNotification(
             user.pushToken,
@@ -378,37 +512,65 @@ const verifySubmission = async (req, res) => {
             "Your lost vehicle proof has been approved"
           );
         }
+      } catch (notifyErr) {
+        console.error("❌ Notification failed:", notifyErr.message);
       }
+
+      return res.json({
+        success: true,
+        message: "Submission approved successfully",
+        submission,
+      });
     }
 
+    /* ===============================
+       REJECTED
+    ================================ */
     if (status === "rejected") {
-      /* 🔥 if rejected, reopen normal post */
       if (submission.post) {
-        const post = await Post.findById(submission.post);
+        const post = await Post.findById(submission.post).session(session);
         if (post) {
           post.status = "active";
-          await post.save();
+          await post.save({ session });
         }
       }
 
-      if (user?.pushToken) {
-        await sendNotification(
-          user.pushToken,
-          "❌ Submission Rejected",
-          "Your submission was rejected by admin"
-        );
+      await user.save({ session });
+      await submission.save({ session });
+
+      await session.commitTransaction();
+      safeEnd(session);
+
+      try {
+        if (user?.pushToken) {
+          await sendNotification(
+            user.pushToken,
+            "❌ Submission Rejected",
+            "Your submission was rejected by admin"
+          );
+        }
+      } catch (notifyErr) {
+        console.error("❌ Notification failed:", notifyErr.message);
       }
+
+      return res.json({
+        success: true,
+        message: "Submission rejected successfully",
+        submission,
+      });
     }
 
-    await submission.save();
-    await user.save();
+    await safeAbort(session);
+    safeEnd(session);
 
-    return res.json({
-      success: true,
-      message: "Submission updated successfully",
-      submission,
+    return res.status(400).json({
+      success: false,
+      message: "Invalid request",
     });
   } catch (err) {
+    await safeAbort(session);
+    safeEnd(session);
+
     console.error("❌ Verify submission error:", err);
 
     return res.status(500).json({
@@ -429,10 +591,14 @@ const getPendingSubmissions = async (req, res) => {
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
-    return res.json(submissions);
+    return res.json({
+      success: true,
+      submissions,
+    });
   } catch (err) {
     console.error("❌ Pending submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -450,14 +616,19 @@ const getSubmissionById = async (req, res) => {
 
     if (!submission) {
       return res.status(404).json({
+        success: false,
         message: "Submission not found",
       });
     }
 
-    return res.json(submission);
+    return res.json({
+      success: true,
+      submission,
+    });
   } catch (err) {
     console.error("❌ Get submission by id error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }
@@ -469,14 +640,12 @@ const getSubmissionById = async (req, res) => {
 const getAllSubmissions = async (req, res) => {
   try {
     const { status, from, to } = req.query;
-
     const query = {};
 
     if (status) query.status = status;
 
     if (from || to) {
       query.createdAt = {};
-
       if (from) query.createdAt.$gte = new Date(from);
       if (to) query.createdAt.$lte = new Date(to);
     }
@@ -487,10 +656,14 @@ const getAllSubmissions = async (req, res) => {
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
-    return res.json(submissions);
+    return res.json({
+      success: true,
+      submissions,
+    });
   } catch (err) {
     console.error("❌ Get all submissions error:", err);
     return res.status(500).json({
+      success: false,
       message: err.message,
     });
   }

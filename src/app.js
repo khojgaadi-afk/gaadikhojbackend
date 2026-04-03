@@ -5,13 +5,25 @@ const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const compression = require("compression");
 const path = require("path");
+const crypto = require("crypto");
+const mongoose = require("mongoose");
 
 const app = express();
 
 /* =========================
-   TRUST PROXY
+   BASIC HARDENING
 ========================= */
-app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.set("trust proxy", true);
+
+/* =========================
+   REQUEST ID
+========================= */
+app.use((req, res, next) => {
+  req.requestId = crypto.randomUUID();
+  res.setHeader("X-Request-Id", req.requestId);
+  next();
+});
 
 /* =========================
    SECURITY
@@ -20,7 +32,7 @@ app.use(
   helmet({
     crossOriginResourcePolicy: false,
     contentSecurityPolicy: false,
-  }),
+  })
 );
 
 /* =========================
@@ -31,15 +43,16 @@ app.use(compression());
 /* =========================
    LOGGING
 ========================= */
-app.use(morgan("dev"));
+if (process.env.NODE_ENV !== "production") {
+  app.use(morgan("dev"));
 
-/* =========================
-   DEBUG
-========================= */
-app.use((req, res, next) => {
-  console.log("➡️", req.method, req.originalUrl);
-  next();
-});
+  app.use((req, res, next) => {
+    console.log(`➡️ [${req.requestId}] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+} else {
+  app.use(morgan("combined"));
+}
 
 /* =========================
    RATE LIMIT
@@ -47,6 +60,8 @@ app.use((req, res, next) => {
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     success: false,
     message: "Too many requests, please try again later.",
@@ -56,9 +71,22 @@ const apiLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     success: false,
     message: "Too many login attempts, please try again later.",
+  },
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests for this action. Please try again later.",
   },
 });
 
@@ -67,23 +95,59 @@ app.use("/api", apiLimiter);
 /* =========================
    CORS
 ========================= */
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "*",
-    credentials: true,
-  }),
-);
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  process.env.ADMIN_URL,
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://localhost:8081",
+  "exp://127.0.0.1:8081",
+  "exp://192.168.0.100:8081",
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow Postman / mobile apps / server-to-server
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 /* =========================
    BODY
 ========================= */
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+
+/* =========================
+   INVALID JSON HANDLER
+========================= */
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON payload",
+    });
+  }
+  next(err);
+});
 
 /* =========================
    STATIC
 ========================= */
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+app.use(
+  "/uploads/public",
+  express.static(path.join(__dirname, "../uploads/public"))
+);
 
 /* =========================
    ROUTES IMPORT
@@ -103,6 +167,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const earnRoutes = require("./routes/earnRoutes");
 const taskRoutes = require("./routes/taskRoutes");
+
 /* =========================
    ROOT / HEALTH
 ========================= */
@@ -117,7 +182,11 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
     status: "ok",
-    message: "🚀 Backend Running",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    database:
+      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+    environment: process.env.NODE_ENV || "development",
   });
 });
 
@@ -131,11 +200,11 @@ app.use("/api/users/auth", authLimiter, userAuthRoutes);
    CORE
 ========================= */
 app.use("/api/posts", postRoutes);
-app.use("/api/submissions", submissionRoutes);
-app.use("/api/wallet", walletRoutes);
+app.use("/api/submissions", strictLimiter, submissionRoutes);
+app.use("/api/wallet", strictLimiter, walletRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/users", userRoutes);
-app.use("/api/withdrawals", withdrawalRoutes);
+app.use("/api/withdrawals", strictLimiter, withdrawalRoutes);
 app.use("/api/admins", adminRoutes);
 
 /* =========================
@@ -144,10 +213,9 @@ app.use("/api/admins", adminRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/lost-vehicles", lostVehicleRoutes);
-app.use("/api/referral", referralRoutes);
-app.use("/api/earn", earnRoutes);
+app.use("/api/referrals", strictLimiter, referralRoutes);
+app.use("/api/earn", strictLimiter, earnRoutes);
 app.use("/api/tasks", taskRoutes);
-
 
 /* =========================
    404 HANDLER
@@ -163,12 +231,48 @@ app.use((req, res) => {
    ERROR HANDLER
 ========================= */
 app.use((err, req, res, next) => {
-  console.error("🔥 FULL ERROR STACK:\n", err);
+  console.error(`🔥 [${req.requestId}] FULL ERROR STACK:\n`, err);
 
-  res.status(err.status || 500).json({
+  let statusCode = err.status || 500;
+  let message = err.message || "Internal Server Error";
+
+  if (err.name === "CastError") {
+    statusCode = 400;
+    message = "Invalid resource ID";
+  }
+
+  if (err.code === 11000) {
+    statusCode = 400;
+    message = "Duplicate field value entered";
+  }
+
+  if (err.name === "ValidationError") {
+    statusCode = 400;
+    message = Object.values(err.errors)
+      .map((e) => e.message)
+      .join(", ");
+  }
+
+  if (err.name === "JsonWebTokenError") {
+    statusCode = 401;
+    message = "Invalid token";
+  }
+
+  if (err.name === "TokenExpiredError") {
+    statusCode = 401;
+    message = "Token expired";
+  }
+
+  // CORS custom error
+  if (err.message === "Not allowed by CORS") {
+    statusCode = 403;
+    message = "CORS blocked this request";
+  }
+
+  res.status(statusCode).json({
     success: false,
-    message: err.message || "Internal Server Error",
-    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
+    message,
+    ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
   });
 });
 
