@@ -6,7 +6,6 @@ const { creditReward } = require("../services/rewardService");
 const { sendNotification } = require("../utils/sendNotification");
 
 const cloudinary = require("../config/cloudinary");
-const streamifier = require("streamifier");
 
 /* ===============================
    HELPERS
@@ -29,32 +28,27 @@ const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
-const uploadBufferToCloudinary = (
-  fileBuffer,
-  folder = "gaadikhoj/submissions"
-) => {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "image",
-      },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(fileBuffer).pipe(stream);
-  });
-};
-
 /* ===============================
    USER SUBMITS PROOF
 ================================ */
 const createSubmission = async (req, res) => {
   try {
     const { postId, vehicleId, lat, lng, notes } = req.body;
+
+    console.log("📥 BODY:", req.body);
+    console.log(
+      "📥 FILE:",
+      req.file
+        ? {
+            fieldname: req.file.fieldname,
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+            filename: req.file.filename,
+            path: req.file.path,
+          }
+        : null
+    );
 
     const user = await User.findById(req.user._id || req.user.id);
 
@@ -65,6 +59,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // 🔥 trust score restriction
     if (typeof user.trustScore === "number" && user.trustScore < 1) {
       return res.status(403).json({
         success: false,
@@ -72,6 +67,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // 🔥 anti-spam protection
     const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
     const recentSubmissions = await Submission.countDocuments({
@@ -94,6 +90,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // 🔥 file required
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -101,6 +98,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // 🔥 one task source required
     if (!postId && !vehicleId) {
       return res.status(400).json({
         success: false,
@@ -115,6 +113,7 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // 🔥 location validation
     const latNum = Number(lat);
     const lngNum = Number(lng);
 
@@ -153,6 +152,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
+      // 🔥 block task if already taken
       const alreadyTaken = await Submission.findOne({
         post: postId,
         status: { $in: ["pending", "approved"] },
@@ -165,6 +165,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
+      // 🔥 prevent same user duplicate
       const exist = await Submission.findOne({
         post: postId,
         user: user._id,
@@ -177,6 +178,7 @@ const createSubmission = async (req, res) => {
         });
       }
 
+      // 🔥 location radius validation
       const postLat = Number(post.location?.lat);
       const postLng = Number(post.location?.lng);
 
@@ -205,7 +207,7 @@ const createSubmission = async (req, res) => {
 
       submissionData.post = postId;
 
-      // 🔥 lock task until admin verifies
+      // 🔥 lock task until verification
       post.status = "pending";
       await post.save();
     }
@@ -251,20 +253,34 @@ const createSubmission = async (req, res) => {
     }
 
     /* ===============================
-       UPLOAD TO CLOUDINARY (LAST STEP)
+       LOCAL FILE URL
     ================================ */
-    let uploadedImage;
+    const localPhotoUrl = `/uploads/${req.file.filename}`;
+
+    /* ===============================
+       CLOUDINARY UPLOAD (fallback-safe)
+    ================================ */
+    let cloudPhotoUrl = "";
+
     try {
-      uploadedImage = await uploadBufferToCloudinary(req.file.buffer);
-    } catch (uploadErr) {
-      console.error("❌ Cloudinary upload failed:", uploadErr);
-      return res.status(500).json({
-        success: false,
-        message: "Image upload failed. Please try again.",
+      const uploadedImage = await cloudinary.uploader.upload(req.file.path, {
+        folder: "gaadikhoj/submissions",
+        resource_type: "image",
       });
+
+      cloudPhotoUrl = uploadedImage.secure_url;
+      console.log("☁️ Cloudinary URL:", cloudPhotoUrl);
+    } catch (uploadErr) {
+      console.error("⚠️ Cloudinary upload failed:", uploadErr.message);
+      // no return — local fallback still works
     }
 
-    submissionData.photoUrl = uploadedImage.secure_url;
+    /* ===============================
+       FINAL PHOTO URL
+    ================================ */
+    submissionData.localPhotoUrl = localPhotoUrl;
+    submissionData.cloudPhotoUrl = cloudPhotoUrl;
+    submissionData.photoUrl = cloudPhotoUrl || localPhotoUrl;
 
     const submission = await Submission.create(submissionData);
 

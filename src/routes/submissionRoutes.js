@@ -4,7 +4,7 @@ const router = express.Router();
 /* =========================
    MIDDLEWARES
 ========================= */
-const upload = require("../middleware/uploadMiddleware"); // ✅ NEW (Cloudinary memory upload)
+const upload = require("../utils/upload"); // ✅ NEW (Cloudinary memory upload)
 
 const {
   createSubmission,
@@ -41,6 +41,7 @@ router.post("/", protectUser, (req, res, next) => {
     next();
   });
 }, createSubmission);
+
 // 🔥 GET USER SUBMISSIONS
 router.get("/user", protectUser, getUserSubmissions);
 

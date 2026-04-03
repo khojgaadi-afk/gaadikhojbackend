@@ -4,6 +4,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 const compression = require("compression");
+const path = require("path"); // 🔥 IMPORTANT
 
 const app = express();
 
@@ -78,6 +79,11 @@ app.use(
 ========================= */
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+/* =========================
+   🔥 LOCAL UPLOADS SERVE
+========================= */
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 /* =========================
    ROUTES IMPORT
@@ -162,7 +168,6 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     success: false,
     message: err.message || "Internal Server Error",
-    stack: process.env.NODE_ENV === "production" ? undefined : err.stack,
   });
 });
 
