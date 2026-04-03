@@ -27,13 +27,20 @@ const { authorize } = require("../middleware/permissionMiddleware");
 ========================= */
 
 // 🔥 CREATE SUBMISSION (PHOTO UPLOAD)
-router.post(
-  "/",
-  protectUser,
-  upload.single("photo"), // ⚠️ IMPORTANT: field name MUST be "photo"
-  createSubmission
-);
+router.post("/", protectUser, (req, res, next) => {
+  upload.single("photo")(req, res, function (err) {
+    if (err) {
+      console.error("❌ Multer upload error:", err);
 
+      return res.status(400).json({
+        success: false,
+        message: err.message || "Image upload failed",
+      });
+    }
+
+    next();
+  });
+}, createSubmission);
 // 🔥 GET USER SUBMISSIONS
 router.get("/user", protectUser, getUserSubmissions);
 
