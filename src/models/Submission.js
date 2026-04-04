@@ -88,7 +88,7 @@ const submissionSchema = new mongoose.Schema(
    INDEXES
 ========================== */
 
-/* One active/pending-approved submission per post */
+// One active submission per post
 submissionSchema.index(
   { post: 1, status: 1 },
   {
@@ -100,7 +100,7 @@ submissionSchema.index(
   }
 );
 
-/* One active/pending-approved submission per vehicle */
+// One active submission per vehicle
 submissionSchema.index(
   { vehicle: 1, status: 1 },
   {
@@ -112,7 +112,7 @@ submissionSchema.index(
   }
 );
 
-/* Same user cannot submit same post twice */
+// Same user cannot submit same post twice
 submissionSchema.index(
   { user: 1, post: 1 },
   {
@@ -123,7 +123,7 @@ submissionSchema.index(
   }
 );
 
-/* Same user cannot submit same vehicle twice */
+// Same user cannot submit same vehicle twice
 submissionSchema.index(
   { user: 1, vehicle: 1 },
   {
@@ -160,6 +160,7 @@ submissionSchema.pre("validate", function (next) {
    CLEAN JSON OUTPUT
 ========================== */
 submissionSchema.set("toJSON", {
+  virtuals: true,
   transform: (_, ret) => {
     ret.id = ret._id;
     delete ret._id;
