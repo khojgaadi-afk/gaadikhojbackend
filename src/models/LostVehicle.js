@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 
 const lostVehicleSchema = new mongoose.Schema(
   {
+    /* =========================
+       USER RELATION
+    ========================= */
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -9,6 +12,9 @@ const lostVehicleSchema = new mongoose.Schema(
       index: true,
     },
 
+    /* =========================
+       VEHICLE BASIC INFO
+    ========================= */
     vehicleNumber: {
       type: String,
       required: true,
@@ -25,6 +31,22 @@ const lostVehicleSchema = new mongoose.Schema(
       trim: true,
     },
 
+    brandModel: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    description: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 1000,
+    },
+
+    /* =========================
+       LOCATION
+    ========================= */
     location: {
       lat: {
         type: Number,
@@ -34,18 +56,6 @@ const lostVehicleSchema = new mongoose.Schema(
         type: Number,
         default: null,
       },
-    },
-
-    phone: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    brandModel: {
-      type: String,
-      default: "",
-      trim: true,
     },
 
     city: {
@@ -62,9 +72,9 @@ const lostVehicleSchema = new mongoose.Schema(
       index: true,
     },
 
-    description: {
+    phone: {
       type: String,
-      default: "",
+      required: true,
       trim: true,
     },
 
@@ -91,6 +101,14 @@ const lostVehicleSchema = new mongoose.Schema(
       index: true,
     },
 
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+
+    /* =========================
+       DOCUMENTS / PHOTOS
+    ========================= */
     vehiclePhotos: {
       type: [String],
       default: [],
@@ -117,14 +135,67 @@ const lostVehicleSchema = new mongoose.Schema(
       default: null,
     },
 
+    /* =========================
+       ADMIN REVIEW FLOW
+    ========================= */
     status: {
       type: String,
       enum: ["pending", "approved", "rejected", "found"],
       default: "pending",
       index: true,
     },
+
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+      index: true,
+    },
+
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    rejectedReason: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 500,
+    },
+
+    /* =========================
+       PUBLIC VISIBILITY / SAFETY
+    ========================= */
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    foundAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
+);
+
+/* =========================
+   INDEXES
+========================= */
+lostVehicleSchema.index({ createdAt: -1 });
+lostVehicleSchema.index({ user: 1, status: 1 });
+lostVehicleSchema.index({ city: 1, area: 1, status: 1 });
+lostVehicleSchema.index({ paymentStatus: 1, status: 1 });
+
+/* =========================
+   OPTIONAL SAFETY:
+   prevent duplicate active same vehicle per user
+========================= */
+lostVehicleSchema.index(
+  { user: 1, vehicleNumber: 1, isActive: 1 },
+  { unique: false }
 );
 
 module.exports = mongoose.model("LostVehicle", lostVehicleSchema);

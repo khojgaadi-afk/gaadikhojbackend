@@ -6,7 +6,7 @@ const {
   getActivePosts,
 } = require("../controllers/postController");
 
-const { protectAdmin } = require("../middleware/authMiddleware");
+const { adminProtect: protectAdmin } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/permissionMiddleware");
 
 const upload = require("../utils/upload");

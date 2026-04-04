@@ -1,60 +1,81 @@
 const express = require("express");
 const router = express.Router();
 
-const upload = require("../utils/upload");
-
 const {
   createLostVehicle,
-  getLostVehicles,
-  getPendingLostVehicles,
-  verifyLostVehicle,
+  getMyLostVehicles,
+  getApprovedLostVehicles,
+  adminGetLostVehicles,
+  approveLostVehicle,
+  rejectLostVehicle,
+  markVehicleFound,
 } = require("../controllers/lostVehicleController");
 
 const {
+  protect,
   protectAdmin,
-  protectUser,
 } = require("../middleware/authMiddleware");
 
+const upload = require("../utils/upload");
 const { authorize } = require("../middleware/permissionMiddleware");
 
-/* =========================
-   USER CREATE REPORT
-========================= */
+/* =========================================================
+   USER ROUTES
+========================================================= */
+
+// Public approved vehicles
+router.get("/", getApprovedLostVehicles);
+
+// Logged-in user's own vehicles
+router.get("/my", protect, getMyLostVehicles);
+
+// User create lost vehicle report
 router.post(
   "/",
-  protectUser,
+  protect,
   upload.fields([
-    { name: "photos", maxCount: 5 },
-    { name: "rc", maxCount: 1 },
-    { name: "fir", maxCount: 1 },
-    { name: "aadhar", maxCount: 1 },
+    { name: "vehiclePhotos", maxCount: 5 },
+    { name: "rcDocument", maxCount: 1 },
+    { name: "firDocument", maxCount: 1 },
+    { name: "aadharDocument", maxCount: 1 },
   ]),
   createLostVehicle
 );
 
-/* =========================
-   PUBLIC TASKS
-========================= */
-router.get("/", getLostVehicles);
+/* =========================================================
+   ADMIN ROUTES
+========================================================= */
 
-/* =========================
-   ADMIN PENDING
-========================= */
+// Get all lost vehicles
 router.get(
-  "/pending",
+  "/admin/all",
   protectAdmin,
-  authorize("posts.manage"), // 🔥 permission added
-  getPendingLostVehicles
+  authorize("reports"),
+  adminGetLostVehicles
 );
 
-/* =========================
-   ADMIN VERIFY
-========================= */
-router.put(
-  "/:id/verify",
+// Approve
+router.patch(
+  "/admin/:id/approve",
   protectAdmin,
-  authorize("posts.manage"), // 🔥 permission added
-  verifyLostVehicle
+  authorize("reports"),
+  approveLostVehicle
+);
+
+// Reject
+router.patch(
+  "/admin/:id/reject",
+  protectAdmin,
+  authorize("reports"),
+  rejectLostVehicle
+);
+
+// Mark found / deactivate
+router.patch(
+  "/admin/:id/deactivate",
+  protectAdmin,
+  authorize("reports"),
+  markVehicleFound
 );
 
 module.exports = router;

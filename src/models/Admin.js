@@ -88,7 +88,9 @@ const adminSchema = new mongoose.Schema(
       },
     },
 
-    /* PASSWORD RESET */
+    /* ==========================
+       PASSWORD RESET
+    ========================== */
     resetToken: {
       type: String,
       default: null,
@@ -97,6 +99,27 @@ const adminSchema = new mongoose.Schema(
 
     resetTokenExpire: {
       type: Date,
+      default: null,
+    },
+
+    /* ==========================
+       TOKEN INVALIDATION
+    ========================== */
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+
+    /* ==========================
+       SECURITY / TRACKING
+    ========================== */
+    lastLoginAt: {
+      type: Date,
+      default: null,
+    },
+
+    lastLoginIP: {
+      type: String,
       default: null,
     },
   },
@@ -110,6 +133,12 @@ adminSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
   this.password = await bcrypt.hash(this.password, 10);
+
+  // password change track
+  if (!this.isNew) {
+    this.passwordChangedAt = new Date();
+  }
+
   next();
 });
 

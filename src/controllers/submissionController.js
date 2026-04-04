@@ -202,7 +202,7 @@ const createSubmission = async (req, res) => {
     ================================ */
     if (postId) {
       const post = await Post.findOneAndUpdate(
-        { _id: postId, status: "active" },
+        { _id: postId, status: "approved" },
         { $set: { status: "pending" } },
         { new: true, session }
       );
@@ -223,7 +223,7 @@ const createSubmission = async (req, res) => {
       }).session(session);
 
       if (existingUserSubmission) {
-        post.status = "active";
+        post.status = "approved";
         await post.save({ session });
 
         cleanupUploadedFile(req.file.filename);
@@ -250,7 +250,7 @@ const createSubmission = async (req, res) => {
         const distanceKm = getDistanceInKm(postLat, postLng, latNum, lngNum);
 
         if (distanceKm > 10) {
-          post.status = "active";
+          post.status = "approved";
           await post.save({ session });
 
           cleanupUploadedFile(req.file.filename);
@@ -460,7 +460,6 @@ const verifySubmission = async (req, res) => {
       await session.commitTransaction();
       safeEnd(session);
 
-      /* Reward after DB commit */
       try {
         if (rewardAmount > 0) {
           await creditReward({
@@ -474,13 +473,12 @@ const verifySubmission = async (req, res) => {
         console.error("❌ Reward credit failed after approval:", rewardErr.message);
       }
 
-      /* Notification */
       try {
         if (user?.pushToken) {
           await sendNotification(
             user.pushToken,
             "💰 Reward Approved",
-            `You earned ₹${rewardAmount} for finding vehicle`
+            `You earned ₹${rewardAmount} for completing the task`
           );
         }
       } catch (notifyErr) {
@@ -530,7 +528,7 @@ const verifySubmission = async (req, res) => {
       if (submission.post) {
         const post = await Post.findById(submission.post).session(session);
         if (post) {
-          post.status = "active";
+          post.status = "approved";
           await post.save({ session });
         }
       }

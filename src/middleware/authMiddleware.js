@@ -56,7 +56,7 @@ const protectUser = async (req, res, next) => {
 
     if (
       user.passwordChangedAt &&
-      decoded.iat * 1000 < user.passwordChangedAt.getTime()
+      decoded.iat * 1000 < new Date(user.passwordChangedAt).getTime()
     ) {
       return res.status(401).json({
         success: false,
@@ -77,7 +77,7 @@ const protectUser = async (req, res, next) => {
 };
 
 /* =========================
-   PROTECT ADMIN (UPDATED)
+   PROTECT ADMIN
 ========================= */
 const protectAdmin = async (req, res, next) => {
   try {
@@ -85,53 +85,54 @@ const protectAdmin = async (req, res, next) => {
 
     if (!token) {
       return res.status(401).json({
+        success: false,
         message: "No token provided",
       });
     }
 
     const decoded = verifyToken(token);
 
-    // 🔥 IMPORTANT: permissions automatically included
     const admin = await Admin.findById(decoded.id).select("-password");
 
     if (!admin) {
       return res.status(401).json({
+        success: false,
         message: "Admin not found",
       });
     }
 
     if (admin.status === "blocked") {
       return res.status(403).json({
+        success: false,
         message: "Admin is blocked",
       });
     }
 
-    // optional safety (if you add passwordChangedAt later)
     if (
       admin.passwordChangedAt &&
-      decoded.iat * 1000 < admin.passwordChangedAt.getTime()
+      decoded.iat * 1000 < new Date(admin.passwordChangedAt).getTime()
     ) {
       return res.status(401).json({
+        success: false,
         message: "Token expired. Login again",
       });
     }
 
-    /* =========================
-       ATTACH FULL ADMIN (WITH PERMISSIONS)
-    ========================= */
     req.admin = admin;
-
     next();
   } catch (err) {
     console.error("❌ protectAdmin error:", err.message);
 
     return res.status(401).json({
+      success: false,
       message: "Invalid or expired token",
     });
   }
 };
 
 module.exports = {
-  protectUser,
-  protectAdmin,
+  protect: protectUser, // user routes
+  protectUser, // backward compatibility
+  protectAdmin, // admin routes
+  adminProtect: protectAdmin, // backward compatibility
 };

@@ -36,15 +36,17 @@ exports.createPost = async (req, res) => {
       },
       photoUrl: req.file ? `/uploads/${req.file.filename}` : null,
       createdBy: req.admin._id,
+
+      // 🔥 FIX
+      status: "approved",
     });
 
-    /* 🔔 GET USERS WITH PUSH TOKEN */
+    /* 🔔 SEND NOTIFICATIONS */
     const users = await User.find({
       pushToken: { $ne: null },
       status: "active",
     }).select("pushToken");
 
-    /* 🔔 SEND NOTIFICATIONS (parallel but safe) */
     await Promise.allSettled(
       users.map((user) =>
         sendNotification(
@@ -67,7 +69,7 @@ exports.createPost = async (req, res) => {
 ========================= */
 exports.getActivePosts = async (req, res) => {
   try {
-    const posts = await Post.find({ status: "active" }).sort({
+    const posts = await Post.find({ status: "approved" }).sort({
       createdAt: -1,
     });
 

@@ -11,21 +11,51 @@ const {
 const Admin = require("../models/Admin");
 const AdminSession = require("../models/AdminSession");
 
-const { protectAdmin } = require("../middleware/authMiddleware");
-const { authorize } = require("../middleware/permissionMiddleware");
+// ✅ IMPORTANT: apne actual folder structure ke hisaab se yahi use karo
+const { adminProtect: protectAdmin } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
 const validate = require("../middleware/validateMiddleware");
+
+console.log("protectAdmin:", protectAdmin);
+console.log("authorizeRoles:", authorizeRoles);
+console.log("validate:", validate);
+console.log("registerAdmin:", registerAdmin);
+console.log("loginAdmin:", loginAdmin);
 
 /* =========================
    VALIDATION
 ========================= */
 const loginValidation = [
-  body("email").isEmail(),
-  body("password").notEmpty(),
+  body("email")
+    .isEmail()
+    .withMessage("Valid email is required")
+    .normalizeEmail(),
+
+  body("password")
+    .notEmpty()
+    .withMessage("Password is required"),
 ];
 
 const passwordValidation = [
-  body("password").isLength({ min: 6 }),
+  body("password")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters"),
+];
+
+const registerValidation = [
+  body("email")
+    .isEmail()
+    .withMessage("Valid email is required")
+    .normalizeEmail(),
+
+  body("password")
+    .isLength({ min: 6 })
+    .withMessage("Password must be at least 6 characters"),
+
+  body("role")
+    .optional()
+    .isIn(["admin", "superadmin"])
+    .withMessage("Role must be admin or superadmin"),
 ];
 
 /* =========================
@@ -35,6 +65,8 @@ router.post(
   "/register",
   protectAdmin,
   authorizeRoles("superadmin"),
+  ...registerValidation,
+  validate,
   registerAdmin
 );
 
@@ -53,17 +85,27 @@ router.post(
 ========================= */
 router.post("/logout", protectAdmin, async (req, res) => {
   try {
-    await AdminSession.findOneAndUpdate(
+    // ✅ safer: close all active sessions for this admin
+    await AdminSession.updateMany(
       { adminId: req.admin._id, isActive: true },
       {
-        logoutTime: Date.now(),
-        isActive: false,
+        $set: {
+          logoutTime: new Date(),
+          isActive: false,
+        },
       }
     );
 
-    res.json({ message: "Logged out successfully" });
+    return res.json({
+      success: true,
+      message: "Logged out successfully",
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Admin logout error:", err.message);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Logout failed",
+    });
   }
 });
 
@@ -80,9 +122,17 @@ router.get(
         .populate("adminId", "name email role")
         .sort({ loginTime: -1 });
 
-      res.json(sessions);
+      return res.json({
+        success: true,
+        count: sessions.length,
+        data: sessions,
+      });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      console.error("Admin sessions error:", err.message);
+      return res.status(500).json({
+        success: false,
+        message: err.message || "Failed to fetch sessions",
+      });
     }
   }
 );
@@ -91,48 +141,60 @@ router.get(
    CURRENT ADMIN
 ========================= */
 router.get("/me", protectAdmin, (req, res) => {
-  res.json(req.admin);
+  return res.json({
+    success: true,
+    data: req.admin,
+  });
 });
 
 /* =========================
    FORGOT PASSWORD
 ========================= */
-router.post("/forgot-password", async (req, res) => {
-  try {
-    const { email } = req.body;
+router.post(
+  "/forgot-password",
+  body("email").isEmail().withMessage("Valid email is required"),
+  validate,
+  async (req, res) => {
+    try {
+      const { email } = req.body;
+      const cleanEmail = email.toLowerCase().trim();
 
-    if (!email) {
-      return res.status(400).json({ message: "Email required" });
+      const admin = await Admin.findOne({ email: cleanEmail });
+
+      // 🔐 security-friendly response
+      if (!admin) {
+        return res.json({
+          success: true,
+          message: "If the email exists, a reset link has been generated",
+        });
+      }
+
+      const resetToken = crypto.randomBytes(32).toString("hex");
+
+      admin.resetToken = crypto
+        .createHash("sha256")
+        .update(resetToken)
+        .digest("hex");
+
+      admin.resetTokenExpire = Date.now() + 15 * 60 * 1000;
+
+      await admin.save();
+
+      console.log(`🔐 Admin Reset Link: /reset-password/${resetToken}`);
+
+      return res.json({
+        success: true,
+        message: "If the email exists, a reset link has been generated",
+      });
+    } catch (err) {
+      console.error("Forgot password error:", err.message);
+      return res.status(500).json({
+        success: false,
+        message: err.message || "Failed to generate reset link",
+      });
     }
-
-    const cleanEmail = email.toLowerCase().trim();
-
-    const admin = await Admin.findOne({ email: cleanEmail });
-
-    if (!admin) {
-      return res.status(404).json({ message: "Admin not found" });
-    }
-
-    const resetToken = crypto.randomBytes(32).toString("hex");
-
-    admin.resetToken = crypto
-      .createHash("sha256")
-      .update(resetToken)
-      .digest("hex");
-
-    admin.resetTokenExpire = Date.now() + 15 * 60 * 1000;
-
-    await admin.save();
-
-    console.log(`Reset: /reset-password/${resetToken}`);
-
-    res.json({
-      message: "Reset link generated",
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
   }
-});
+);
 
 /* =========================
    RESET PASSWORD
@@ -155,6 +217,7 @@ router.post(
 
       if (!admin) {
         return res.status(400).json({
+          success: false,
           message: "Invalid or expired token",
         });
       }
@@ -162,12 +225,20 @@ router.post(
       admin.password = req.body.password;
       admin.resetToken = undefined;
       admin.resetTokenExpire = undefined;
+      admin.passwordChangedAt = new Date();
 
       await admin.save();
 
-      res.json({ message: "Password reset successful" });
+      return res.json({
+        success: true,
+        message: "Password reset successful",
+      });
     } catch (err) {
-      res.status(500).json({ message: err.message });
+      console.error("Reset password error:", err.message);
+      return res.status(500).json({
+        success: false,
+        message: err.message || "Password reset failed",
+      });
     }
   }
 );

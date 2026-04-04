@@ -1,234 +1,344 @@
 const LostVehicle = require("../models/LostVehicle");
 
-/* =========================
-   CREATE LOST VEHICLE
-========================= */
+/* =========================================================
+   USER: CREATE LOST VEHICLE
+   ========================================================= */
 exports.createLostVehicle = async (req, res) => {
   try {
     const {
       vehicleNumber,
       vehicleType,
       phone,
-      brandModel,
       city,
       area,
+      brandModel,
       description,
       recoveryCharge,
-      paymentOrderId,
-      paymentStatus,
       lat,
       lng,
     } = req.body;
 
+    const vehiclePhotos =
+      req.files?.vehiclePhotos?.map((f) => `/uploads/${f.filename}`) || [];
+
+    const rcDocument = req.files?.rcDocument?.[0]
+      ? `/uploads/${req.files.rcDocument[0].filename}`
+      : null;
+
+    const firDocument = req.files?.firDocument?.[0]
+      ? `/uploads/${req.files.firDocument[0].filename}`
+      : null;
+
+    const aadharDocument = req.files?.aadharDocument?.[0]
+      ? `/uploads/${req.files.aadharDocument[0].filename}`
+      : null;
+
+    /* =========================
+       VALIDATION
+    ========================= */
     if (!vehicleNumber || !vehicleType || !phone || !city || !area) {
       return res.status(400).json({
         success: false,
-        message:
-          "vehicleNumber, vehicleType, phone, city and area are required",
+        message: "vehicleNumber, vehicleType, phone, city and area are required",
       });
     }
 
-    /* PAYMENT CHECK */
-    if (!paymentOrderId || paymentStatus !== "PAID") {
-      return res.status(400).json({
-        success: false,
-        message: "Payment required before reporting vehicle",
-      });
-    }
-
-    /* VEHICLE PHOTOS */
-    let photos = [];
-
-    if (req.files?.photos) {
-      photos = req.files.photos.map((f) => `/uploads/${f.filename}`);
-    }
-
-    if (!photos.length) {
+    if (!vehiclePhotos.length) {
       return res.status(400).json({
         success: false,
         message: "At least one vehicle photo is required",
       });
     }
 
-    /* DOCUMENTS */
-    const rc = req.files?.rc?.[0]
-      ? `/uploads/${req.files.rc[0].filename}`
-      : null;
+    /* =========================
+       DUPLICATE CHECK
+    ========================= */
+    const existing = await LostVehicle.findOne({
+      user: req.user._id,
+      vehicleNumber: vehicleNumber.trim().toUpperCase(),
+      status: { $in: ["pending", "approved"] },
+      isActive: true,
+    });
 
-    const fir = req.files?.fir?.[0]
-      ? `/uploads/${req.files.fir[0].filename}`
-      : null;
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: "You already have an active request for this vehicle number",
+      });
+    }
 
-    const aadhar = req.files?.aadhar?.[0]
-      ? `/uploads/${req.files.aadhar[0].filename}`
-      : null;
-
-    const latNum = lat !== undefined ? Number(lat) : null;
-    const lngNum = lng !== undefined ? Number(lng) : null;
-
-    /* CREATE VEHICLE */
-    const vehicle = await LostVehicle.create({
-      user: req.user._id || req.user.id,
+    /* =========================
+       CREATE SAFE DOC
+       IMPORTANT:
+       USER BODY se status / approvedBy / approvedAt /
+       paymentStatus kabhi trust nahi karna
+    ========================= */
+    const lostVehicle = await LostVehicle.create({
+      user: req.user._id,
 
       vehicleNumber: vehicleNumber.trim().toUpperCase(),
       vehicleType: vehicleType.trim().toLowerCase(),
       phone: phone.trim(),
-      brandModel: brandModel?.trim() || "",
       city: city.trim(),
       area: area.trim(),
+
+      brandModel: brandModel?.trim() || "",
       description: description?.trim() || "",
 
-      recoveryCharge: Number(recoveryCharge) || 0,
-      paymentOrderId: paymentOrderId?.trim(),
-      paymentStatus: paymentStatus || "PAID",
-
       location: {
-        lat: isNaN(latNum) ? null : latNum,
-        lng: isNaN(lngNum) ? null : lngNum,
+        lat: lat ? Number(lat) : null,
+        lng: lng ? Number(lng) : null,
       },
 
-      vehiclePhotos: photos,
+      recoveryCharge: Number(recoveryCharge) || 0,
 
-      rcDocument: rc,
-      firDocument: fir,
-      aadharDocument: aadhar,
+      vehiclePhotos,
+      rcDocument,
+      firDocument,
+      aadharDocument,
 
+      // 🔥 FORCE SAFE DEFAULTS
       status: "pending",
+      approvedBy: null,
+      approvedAt: null,
+      rejectedReason: "",
+      isActive: true,
+
+      paymentOrderId: null,
+      paymentStatus: "PENDING",
+      paidAt: null,
+      foundAt: null,
     });
 
     return res.status(201).json({
       success: true,
-      message: "Lost vehicle reported successfully",
-      vehicle,
+      message: "Lost vehicle submitted successfully and sent for admin approval",
+      data: lostVehicle,
     });
-  } catch (err) {
-    console.error("❌ Create lost vehicle error:", err);
-
+  } catch (error) {
+    console.error("createLostVehicle error:", error);
     return res.status(500).json({
       success: false,
-      message: err.message || "Server error",
+      message: "Server error while creating lost vehicle",
+      error: error.message,
     });
   }
 };
 
-/* =========================
-   PUBLIC LIST (APP USERS)
-========================= */
-exports.getLostVehicles = async (req, res) => {
+/* =========================================================
+   PUBLIC: ONLY APPROVED ACTIVE VEHICLES
+   ========================================================= */
+exports.getApprovedLostVehicles = async (req, res) => {
   try {
-    const vehicles = await LostVehicle.find({
+    const { city, area, vehicleType, search } = req.query;
+
+    const query = {
       status: "approved",
-    })
+      isActive: true,
+    };
+
+    if (city) query.city = new RegExp(city, "i");
+    if (area) query.area = new RegExp(area, "i");
+    if (vehicleType) query.vehicleType = vehicleType.toLowerCase();
+
+    if (search) {
+      query.$or = [
+        { vehicleNumber: new RegExp(search, "i") },
+        { city: new RegExp(search, "i") },
+        { area: new RegExp(search, "i") },
+        { brandModel: new RegExp(search, "i") },
+      ];
+    }
+
+    const vehicles = await LostVehicle.find(query)
       .populate("user", "name")
       .sort({ createdAt: -1 });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      vehicles,
+      count: vehicles.length,
+      data: vehicles,
     });
-  } catch (err) {
-    console.error("❌ Get vehicles error:", err);
-
+  } catch (error) {
+    console.error("getApprovedLostVehicles error:", error);
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Server error while fetching vehicles",
+      error: error.message,
     });
   }
 };
 
-/* =========================
-   ADMIN PENDING LIST
-========================= */
-exports.getPendingLostVehicles = async (req, res) => {
+/* =========================================================
+   USER: GET MY VEHICLES
+   ========================================================= */
+exports.getMyLostVehicles = async (req, res) => {
   try {
-    const vehicles = await LostVehicle.find({
-      status: "pending",
-    })
-      .populate("user", "name email")
-      .sort({ createdAt: -1 });
-
-    return res.json({
-      success: true,
-      vehicles,
+    const vehicles = await LostVehicle.find({ user: req.user._id }).sort({
+      createdAt: -1,
     });
-  } catch (err) {
-    console.error("❌ Pending vehicles error:", err);
 
+    return res.status(200).json({
+      success: true,
+      count: vehicles.length,
+      data: vehicles,
+    });
+  } catch (error) {
+    console.error("getMyLostVehicles error:", error);
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Server error while fetching your vehicles",
+      error: error.message,
     });
   }
 };
 
-/* =========================
-   ADMIN VERIFY / UPDATE STATUS
-========================= */
-exports.verifyLostVehicle = async (req, res) => {
+/* =========================================================
+   ADMIN: GET ALL VEHICLES
+   ========================================================= */
+exports.adminGetLostVehicles = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status } = req.query;
 
-    if (!["approved", "rejected", "found"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid status",
-      });
+    const query = {};
+    if (status && ["pending", "approved", "rejected", "found"].includes(status)) {
+      query.status = status;
     }
 
-    const vehicle = await LostVehicle.findById(req.params.id);
+    const vehicles = await LostVehicle.find(query)
+      .populate("user", "name email")
+      .populate("approvedBy", "email role")
+      .sort({ createdAt: -1 });
 
+    return res.status(200).json({
+      success: true,
+      count: vehicles.length,
+      data: vehicles,
+    });
+  } catch (error) {
+    console.error("adminGetLostVehicles error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching admin vehicles",
+      error: error.message,
+    });
+  }
+};
+
+/* =========================================================
+   ADMIN: APPROVE
+   ========================================================= */
+exports.approveLostVehicle = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const vehicle = await LostVehicle.findById(id);
     if (!vehicle) {
       return res.status(404).json({
         success: false,
-        message: "Vehicle not found",
+        message: "Lost vehicle not found",
       });
     }
 
-    /*
-      RULES:
-      pending  -> approved / rejected
-      approved -> found
-    */
+    vehicle.status = "approved";
+    vehicle.approvedBy = req.admin._id;
+    vehicle.approvedAt = new Date();
+    vehicle.rejectedReason = "";
 
-    if (vehicle.status === "pending") {
-      if (!["approved", "rejected"].includes(status)) {
-        return res.status(400).json({
-          success: false,
-          message: "Pending vehicle can only be approved or rejected",
-        });
-      }
-    }
-
-    if (vehicle.status === "approved") {
-      if (status !== "found") {
-        return res.status(400).json({
-          success: false,
-          message: "Approved vehicle can only be marked as found",
-        });
-      }
-    }
-
-    if (["rejected", "found"].includes(vehicle.status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Vehicle already finalized",
-      });
-    }
-
-    vehicle.status = status;
     await vehicle.save();
 
-    return res.json({
+    return res.status(200).json({
       success: true,
-      message: "Vehicle status updated successfully",
-      vehicle,
+      message: "Lost vehicle approved successfully",
+      data: vehicle,
     });
-  } catch (err) {
-    console.error("❌ Verify vehicle error:", err);
-
+  } catch (error) {
+    console.error("approveLostVehicle error:", error);
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Server error while approving vehicle",
+      error: error.message,
+    });
+  }
+};
+
+/* =========================================================
+   ADMIN: REJECT
+   ========================================================= */
+exports.rejectLostVehicle = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Rejection reason is required",
+      });
+    }
+
+    const vehicle = await LostVehicle.findById(id);
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: "Lost vehicle not found",
+      });
+    }
+
+    vehicle.status = "rejected";
+    vehicle.approvedBy = null;
+    vehicle.approvedAt = null;
+    vehicle.rejectedReason = reason.trim();
+
+    await vehicle.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Lost vehicle rejected successfully",
+      data: vehicle,
+    });
+  } catch (error) {
+    console.error("rejectLostVehicle error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while rejecting vehicle",
+      error: error.message,
+    });
+  }
+};
+
+/* =========================================================
+   ADMIN: MARK FOUND
+   ========================================================= */
+exports.markVehicleFound = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const vehicle = await LostVehicle.findById(id);
+    if (!vehicle) {
+      return res.status(404).json({
+        success: false,
+        message: "Lost vehicle not found",
+      });
+    }
+
+    vehicle.status = "found";
+    vehicle.foundAt = new Date();
+    vehicle.isActive = false;
+
+    await vehicle.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Vehicle marked as found",
+      data: vehicle,
+    });
+  } catch (error) {
+    console.error("markVehicleFound error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while marking vehicle found",
+      error: error.message,
     });
   }
 };

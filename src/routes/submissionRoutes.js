@@ -2,9 +2,9 @@ const express = require("express");
 const router = express.Router();
 
 /* =========================
-   MIDDLEWARES
+   MIDDLEWARE
 ========================= */
-const upload = require("../utils/upload"); // ✅ NEW (Cloudinary memory upload)
+const upload = require("../utils/upload");
 
 const {
   createSubmission,
@@ -16,8 +16,8 @@ const {
 } = require("../controllers/submissionController");
 
 const {
+  protect,
   protectAdmin,
-  protectUser,
 } = require("../middleware/authMiddleware");
 
 const { authorize } = require("../middleware/permissionMiddleware");
@@ -26,32 +26,35 @@ const { authorize } = require("../middleware/permissionMiddleware");
    USER ROUTES
 ========================= */
 
-// 🔥 CREATE SUBMISSION (PHOTO UPLOAD)
-router.post("/", protectUser, (req, res, next) => {
-  upload.single("photo")(req, res, function (err) {
-    if (err) {
-      console.error("❌ Multer upload error:", err);
+// CREATE SUBMISSION
+router.post(
+  "/",
+  protect,
+  (req, res, next) => {
+    upload.single("photo")(req, res, function (err) {
+      if (err) {
+        console.error("❌ Multer upload error:", err);
 
-      return res.status(400).json({
-        success: false,
-        message: err.message || "Image upload failed",
-      });
-    }
+        return res.status(400).json({
+          success: false,
+          message: err.message || "Image upload failed",
+        });
+      }
 
-    next();
-  });
-}, createSubmission);
+      next();
+    });
+  },
+  createSubmission
+);
 
-// 🔥 GET USER SUBMISSIONS
-router.get("/user", protectUser, getUserSubmissions);
+// GET USER SUBMISSIONS
+router.get("/user", protect, getUserSubmissions);
 
 /* =========================
    ADMIN ROUTES
 ========================= */
 
-// ⚠️ IMPORTANT: Specific routes FIRST
-
-// 🔥 GET PENDING SUBMISSIONS
+// GET PENDING SUBMISSIONS
 router.get(
   "/pending",
   protectAdmin,
@@ -59,7 +62,7 @@ router.get(
   getPendingSubmissions
 );
 
-// 🔥 GET ALL SUBMISSIONS
+// GET ALL SUBMISSIONS
 router.get(
   "/",
   protectAdmin,
@@ -67,7 +70,7 @@ router.get(
   getAllSubmissions
 );
 
-// 🔥 VERIFY (APPROVE / REJECT)
+// VERIFY (APPROVE / REJECT)
 router.put(
   "/:id/verify",
   protectAdmin,
@@ -75,7 +78,7 @@ router.put(
   verifySubmission
 );
 
-// 🔥 GET SINGLE SUBMISSION
+// GET SINGLE SUBMISSION
 router.get(
   "/:id",
   protectAdmin,
