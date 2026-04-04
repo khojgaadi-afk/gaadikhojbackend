@@ -94,3 +94,81 @@ exports.getActivePosts = async (req, res) => {
     });
   }
 };
+/* =========================
+   UPDATE POST
+========================= */
+exports.updatePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { carNumber, city, area, rewardAmount, status } = req.body;
+
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: "Post not found",
+      });
+    }
+
+    if (carNumber !== undefined) post.carNumber = carNumber.trim().toUpperCase();
+    if (city !== undefined) post.city = city.trim();
+    if (area !== undefined) post.area = area.trim();
+    if (rewardAmount !== undefined) {
+      const rewardNum = Number(rewardAmount);
+      if (isNaN(rewardNum) || rewardNum <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid reward amount",
+        });
+      }
+      post.rewardAmount = rewardNum;
+    }
+
+    if (status !== undefined) {
+      post.status = status;
+    }
+
+    await post.save();
+
+    return res.json({
+      success: true,
+      message: "Post updated successfully",
+      post,
+    });
+  } catch (err) {
+    console.error("❌ UPDATE POST ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to update post",
+    });
+  }
+};
+
+/* =========================
+   DELETE POST
+========================= */
+exports.deletePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const post = await Post.findByIdAndDelete(id);
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: "Post not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Post deleted successfully",
+    });
+  } catch (err) {
+    console.error("❌ DELETE POST ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to delete post",
+    });
+  }
+};
