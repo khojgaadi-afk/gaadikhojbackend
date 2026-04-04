@@ -11,6 +11,7 @@ exports.createPost = async (req, res) => {
 
     if (!carNumber || !city || !area || !rewardAmount) {
       return res.status(400).json({
+        success: false,
         message: "carNumber, city, area and rewardAmount are required",
       });
     }
@@ -21,24 +22,25 @@ exports.createPost = async (req, res) => {
 
     if (isNaN(rewardNum) || rewardNum <= 0) {
       return res.status(400).json({
+        success: false,
         message: "Invalid reward amount",
       });
     }
 
     const post = await Post.create({
-      carNumber,
-      city,
-      area,
+      carNumber: carNumber.trim().toUpperCase(),
+      city: city.trim(),
+      area: area.trim(),
       rewardAmount: rewardNum,
       location: {
         lat: isNaN(latNum) ? null : latNum,
         lng: isNaN(lngNum) ? null : lngNum,
       },
       photoUrl: req.file ? `/uploads/${req.file.filename}` : null,
-      createdBy: req.admin._id,
+      createdBy: req.admin?._id || req.user?._id || null,
 
-      // 🔥 FIX
-      status: "approved",
+      // ✅ CORRECT STATUS
+      status: "active",
     });
 
     /* 🔔 SEND NOTIFICATIONS */
@@ -52,15 +54,22 @@ exports.createPost = async (req, res) => {
         sendNotification(
           user.pushToken,
           "🚗 New Task Available",
-          `Car ${carNumber} spotted in ${city}. Reward ₹${rewardNum}`
+          `Car ${post.carNumber} spotted in ${post.city}. Reward ₹${rewardNum}`
         )
       )
     );
 
-    res.status(201).json(post);
+    return res.status(201).json({
+      success: true,
+      message: "Post created successfully",
+      post,
+    });
   } catch (err) {
     console.error("❌ CREATE POST ERROR:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to create post",
+    });
   }
 };
 
@@ -69,13 +78,19 @@ exports.createPost = async (req, res) => {
 ========================= */
 exports.getActivePosts = async (req, res) => {
   try {
-    const posts = await Post.find({ status: "approved" }).sort({
+    const posts = await Post.find({ status: "active" }).sort({
       createdAt: -1,
     });
 
-    res.json(posts);
+    return res.json({
+      success: true,
+      posts,
+    });
   } catch (err) {
     console.error("❌ GET POSTS ERROR:", err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch posts",
+    });
   }
 };
