@@ -25,6 +25,7 @@ const transactionSchema = new mongoose.Schema(
         "referral",
         "bonus",
         "withdrawal",
+        "withdraw", // backward compatibility for old data
         "signup_bonus",
         "admin_bonus",
         "manual_adjustment",
@@ -70,6 +71,12 @@ const transactionSchema = new mongoose.Schema(
 /* Normalize transaction amount */
 transactionSchema.pre("save", function (next) {
   this.amount = Number(Number(this.amount).toFixed(2));
+
+  // normalize old/bad source values before validation/save
+  if (!this.source || this.source === "withdraw") {
+    this.source = this.source === "withdraw" ? "withdrawal" : "submission";
+  }
+
   next();
 });
 
@@ -136,6 +143,22 @@ walletSchema.pre("save", function (next) {
   this.balance = Number(Number(this.balance).toFixed(2));
   this.totalCredited = Number(Number(this.totalCredited).toFixed(2));
   this.totalDebited = Number(Number(this.totalDebited).toFixed(2));
+
+  // normalize bad old transaction source values
+  if (Array.isArray(this.transactions)) {
+    this.transactions = this.transactions.map((txn) => {
+      if (!txn.source || txn.source === null) {
+        txn.source = "submission";
+      }
+
+      if (txn.source === "withdraw") {
+        txn.source = "withdrawal";
+      }
+
+      return txn;
+    });
+  }
+
   next();
 });
 
