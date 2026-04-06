@@ -59,7 +59,7 @@ if (process.env.NODE_ENV !== "production") {
 ========================= */
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -79,9 +79,20 @@ const authLimiter = rateLimit({
   },
 });
 
-const strictLimiter = rateLimit({
+const readLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
-  max: 50,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many read requests. Please try again later.",
+  },
+});
+
+const actionLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 150,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -107,7 +118,6 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow Postman / mobile apps / server-to-server
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
@@ -200,11 +210,11 @@ app.use("/api/users/auth", authLimiter, userAuthRoutes);
    CORE
 ========================= */
 app.use("/api/posts", postRoutes);
-app.use("/api/submissions", strictLimiter, submissionRoutes);
-app.use("/api/wallet", strictLimiter, walletRoutes);
+app.use("/api/submissions", readLimiter, submissionRoutes);
+app.use("/api/wallet", readLimiter, walletRoutes);
 app.use("/api/analytics", analyticsRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/withdrawals", strictLimiter, withdrawalRoutes);
+app.use("/api/users", readLimiter, userRoutes);
+app.use("/api/withdrawals", actionLimiter, withdrawalRoutes);
 app.use("/api/admins", adminRoutes);
 
 /* =========================
@@ -213,9 +223,9 @@ app.use("/api/admins", adminRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/lost-vehicles", lostVehicleRoutes);
-app.use("/api/referrals", strictLimiter, referralRoutes);
-app.use("/api/earn", strictLimiter, earnRoutes);
-app.use("/api/tasks", taskRoutes);
+app.use("/api/referrals", readLimiter, referralRoutes);
+app.use("/api/earn", actionLimiter, earnRoutes);
+app.use("/api/tasks", readLimiter, taskRoutes);
 
 /* =========================
    404 HANDLER
@@ -263,7 +273,6 @@ app.use((err, req, res, next) => {
     message = "Token expired";
   }
 
-  // CORS custom error
   if (err.message === "Not allowed by CORS") {
     statusCode = 403;
     message = "CORS blocked this request";
