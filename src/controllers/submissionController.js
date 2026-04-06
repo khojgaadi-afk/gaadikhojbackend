@@ -201,11 +201,10 @@ const createSubmission = async (req, res) => {
        NORMAL POST TASK
     ================================ */
     if (postId) {
-      // IMPORTANT: assuming Post valid statuses are active / pending / expired
       const post = await Post.findOneAndUpdate(
         { _id: postId, status: "active" },
         { $set: { status: "pending" } },
-        { new: true, session }
+        { new: true, session },
       );
 
       if (!post) {
@@ -350,8 +349,14 @@ const getUserSubmissions = async (req, res) => {
     const submissions = await Submission.find({
       user: req.user._id || req.user.id,
     })
-      .populate("post", "carNumber city area rewardAmount photoUrl status location")
-      .populate("vehicle", "vehicleNumber city area vehiclePhotos location vehicleType")
+      .populate(
+        "post",
+        "carNumber city area rewardAmount photoUrl status location",
+      )
+      .populate(
+        "vehicle",
+        "vehicleNumber city area vehiclePhotos location vehicleType",
+      )
       .sort({ createdAt: -1 });
 
     return res.json({
@@ -436,7 +441,7 @@ const verifySubmission = async (req, res) => {
 
     if (total >= 10) {
       user.trustScore = Number(
-        ((user.approvedSubmissions / total) * 5).toFixed(2)
+        ((user.approvedSubmissions / total) * 5).toFixed(2),
       );
     }
 
@@ -459,36 +464,33 @@ const verifySubmission = async (req, res) => {
 
       rewardAmount = Number(Number(post.rewardAmount || 0).toFixed(2));
       submission.rewardAmount = rewardAmount;
-
-      // IMPORTANT: final approved task should become expired
       post.status = "expired";
 
       await post.save({ session });
       await submission.save({ session });
       await user.save({ session });
 
+      // ✅ IMPORTANT FIX:
+      // reward ko same transaction flow me hi credit karo
+      if (rewardAmount > 0) {
+        await creditReward({
+          userId: submission.user,
+          amount: rewardAmount,
+          refId: submission._id,
+          source: "submission",
+          session,
+        });
+      }
+
       await session.commitTransaction();
       safeEnd(session);
-
-      try {
-        if (rewardAmount > 0) {
-          await creditReward({
-            userId: submission.user,
-            amount: rewardAmount,
-            refId: submission._id,
-            source: "submission",
-          });
-        }
-      } catch (rewardErr) {
-        console.error("❌ Reward credit failed after approval:", rewardErr.message);
-      }
 
       try {
         if (user?.pushToken) {
           await sendNotification(
             user.pushToken,
             "💰 Reward Approved",
-            `You earned ₹${rewardAmount} for completing the task`
+            `You earned ₹${rewardAmount} for completing the task`,
           );
         }
       } catch (notifyErr) {
@@ -517,7 +519,7 @@ const verifySubmission = async (req, res) => {
           await sendNotification(
             user.pushToken,
             "✅ Submission Approved",
-            "Your lost vehicle proof has been approved"
+            "Your lost vehicle proof has been approved",
           );
         }
       } catch (notifyErr) {
@@ -539,7 +541,6 @@ const verifySubmission = async (req, res) => {
         const post = await Post.findById(submission.post).session(session);
 
         if (post) {
-          // IMPORTANT: rejected proof means task becomes available again
           post.status = "active";
           await post.save({ session });
         }
@@ -556,7 +557,7 @@ const verifySubmission = async (req, res) => {
           await sendNotification(
             user.pushToken,
             "❌ Submission Rejected",
-            "Your submission was rejected by admin"
+            "Your submission was rejected by admin",
           );
         }
       } catch (notifyErr) {
@@ -596,8 +597,14 @@ const verifySubmission = async (req, res) => {
 const getPendingSubmissions = async (req, res) => {
   try {
     const submissions = await Submission.find({ status: "pending" })
-      .populate("post", "carNumber city area rewardAmount photoUrl status location")
-      .populate("vehicle", "vehicleNumber city area vehiclePhotos location vehicleType")
+      .populate(
+        "post",
+        "carNumber city area rewardAmount photoUrl status location",
+      )
+      .populate(
+        "vehicle",
+        "vehicleNumber city area vehiclePhotos location vehicleType",
+      )
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
@@ -627,8 +634,14 @@ const getSubmissionById = async (req, res) => {
     }
 
     const submission = await Submission.findById(req.params.id)
-      .populate("post", "carNumber city area rewardAmount photoUrl status location")
-      .populate("vehicle", "vehicleNumber city area vehiclePhotos location vehicleType")
+      .populate(
+        "post",
+        "carNumber city area rewardAmount photoUrl status location",
+      )
+      .populate(
+        "vehicle",
+        "vehicleNumber city area vehiclePhotos location vehicleType",
+      )
       .populate("user", "email name");
 
     if (!submission) {
@@ -668,8 +681,14 @@ const getAllSubmissions = async (req, res) => {
     }
 
     const submissions = await Submission.find(query)
-      .populate("post", "carNumber city area rewardAmount photoUrl status location")
-      .populate("vehicle", "vehicleNumber city area vehiclePhotos location vehicleType")
+      .populate(
+        "post",
+        "carNumber city area rewardAmount photoUrl status location",
+      )
+      .populate(
+        "vehicle",
+        "vehicleNumber city area vehiclePhotos location vehicleType",
+      )
       .populate("user", "email name")
       .sort({ createdAt: -1 });
 
