@@ -1,5 +1,6 @@
 const User = require("../models/User");
 const Wallet = require("../models/Wallet");
+const Referral = require("../models/Referral");
 
 /* =========================
    CONFIG
@@ -8,6 +9,8 @@ const FIRST_BATCH_LIMIT = 10;
 const SECOND_BATCH_LIMIT = 10;
 const TOTAL_DAILY_LIMIT = 20;
 const SECOND_BATCH_DELAY_HOURS = 2;
+const REFERRAL_REWARD_AMOUNT = 10;
+const REFERRAL_AD_TARGET = 10;
 
 /* =========================
    HELPER: RESET DAILY
@@ -54,6 +57,68 @@ const getAdStatusData = (user) => {
     secondBatchUnlocked,
     secondBatchUnlockAt: user.secondBatchUnlockAt || null,
   };
+};
+
+/* =========================
+   HELPER: CREDIT REFERRAL IF ELIGIBLE
+========================= */
+const creditReferralIfEligible = async (user) => {
+  try {
+    // Find referral record where this user was referred by someone
+    const referral = await Referral.findOne({
+      referredUser: user._id,
+      rewardGiven: false,
+      status: "pending",
+    });
+
+    if (!referral) return;
+
+    // Check if referred user has completed required ads
+    const totalAdsWatched = Number(user.adsWatchedToday || 0);
+
+    // IMPORTANT:
+    // If you want lifetime ad count later, create a separate field like user.totalAdsWatched
+    // For now this uses adsWatchedToday as per your current structure.
+    if (totalAdsWatched < REFERRAL_AD_TARGET) return;
+
+    // Find or create referrer's wallet
+    let referrerWallet = await Wallet.findOne({ user: referral.referrer });
+
+    if (!referrerWallet) {
+      referrerWallet = await Wallet.create({
+        user: referral.referrer,
+        balance: 0,
+        totalCredited: 0,
+        totalDebited: 0,
+        transactions: [],
+      });
+    }
+
+    // Credit referral reward
+    referrerWallet.balance += REFERRAL_REWARD_AMOUNT;
+    referrerWallet.totalCredited += REFERRAL_REWARD_AMOUNT;
+
+    referrerWallet.transactions.push({
+      amount: REFERRAL_REWARD_AMOUNT,
+      type: "credit",
+      source: "referral",
+      description: "Referral reward credited",
+      status: "completed",
+      refId: referral._id,
+    });
+
+    await referrerWallet.save();
+
+    // Mark referral as completed
+    referral.rewardGiven = true;
+    referral.rewardAmount = REFERRAL_REWARD_AMOUNT;
+    referral.status = "completed";
+    await referral.save();
+
+    console.log("✅ Referral reward credited successfully");
+  } catch (err) {
+    console.error("❌ Referral reward credit error:", err);
+  }
 };
 
 /* =========================
@@ -241,6 +306,8 @@ exports.watchAd = async (req, res) => {
       wallet = await Wallet.create({
         user: user._id,
         balance: 0,
+        totalCredited: 0,
+        totalDebited: 0,
         transactions: [],
       });
     }
@@ -249,6 +316,7 @@ exports.watchAd = async (req, res) => {
        ADD WALLET BALANCE
     ========================= */
     wallet.balance += reward;
+    wallet.totalCredited += reward;
 
     wallet.transactions.push({
       amount: reward,
@@ -258,11 +326,18 @@ exports.watchAd = async (req, res) => {
         currentBatch === 1
           ? "Ad reward earned (Batch 1)"
           : "Ad reward earned (Batch 2)",
+      status: "completed",
       refId: null,
     });
 
     await wallet.save();
     await user.save();
+
+    /* =========================
+       CHECK REFERRAL CONDITION
+       If referred user completed 10 ads → reward referrer
+    ========================= */
+    await creditReferralIfEligible(user);
 
     const status = getAdStatusData(user);
 
