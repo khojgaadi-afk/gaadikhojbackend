@@ -16,7 +16,7 @@ const {
   protectAdmin,
 } = require("../middleware/authMiddleware");
 
-const upload = require("../utils/upload");
+const { upload } = require("../utils/upload"); 
 const { authorize } = require("../middleware/permissionMiddleware");
 
 /* =========================================================

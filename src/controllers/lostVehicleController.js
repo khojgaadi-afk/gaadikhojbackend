@@ -1,4 +1,17 @@
 const LostVehicle = require("../models/LostVehicle");
+const { uploadToCloudinary } = require("../utils/upload"); // ✅ Cloudinary
+
+/* =========================================================
+   HELPER — Multiple files Cloudinary pe upload karo
+   ========================================================= */
+const uploadMultipleToCloudinary = async (files, folder) => {
+  const urls = [];
+  for (const file of files) {
+    const url = await uploadToCloudinary(file.buffer, folder);
+    urls.push(url);
+  }
+  return urls;
+};
 
 /* =========================================================
    USER: CREATE LOST VEHICLE
@@ -18,21 +31,6 @@ exports.createLostVehicle = async (req, res) => {
       lng,
     } = req.body;
 
-    const vehiclePhotos =
-      req.files?.vehiclePhotos?.map((f) => `/uploads/${f.filename}`) || [];
-
-    const rcDocument = req.files?.rcDocument?.[0]
-      ? `/uploads/${req.files.rcDocument[0].filename}`
-      : null;
-
-    const firDocument = req.files?.firDocument?.[0]
-      ? `/uploads/${req.files.firDocument[0].filename}`
-      : null;
-
-    const aadharDocument = req.files?.aadharDocument?.[0]
-      ? `/uploads/${req.files.aadharDocument[0].filename}`
-      : null;
-
     /* =========================
        VALIDATION
     ========================= */
@@ -43,7 +41,7 @@ exports.createLostVehicle = async (req, res) => {
       });
     }
 
-    if (!vehiclePhotos.length) {
+    if (!req.files?.vehiclePhotos?.length) {
       return res.status(400).json({
         success: false,
         message: "At least one vehicle photo is required",
@@ -68,10 +66,36 @@ exports.createLostVehicle = async (req, res) => {
     }
 
     /* =========================
-       CREATE SAFE DOC
-       IMPORTANT:
-       USER BODY se status / approvedBy / approvedAt /
-       paymentStatus kabhi trust nahi karna
+       ✅ CLOUDINARY UPLOAD
+    ========================= */
+    const vehiclePhotos = await uploadMultipleToCloudinary(
+      req.files.vehiclePhotos,
+      "gaadikhoj/lost-vehicles/photos"
+    );
+
+    const rcDocument = req.files?.rcDocument?.[0]
+      ? await uploadToCloudinary(
+          req.files.rcDocument[0].buffer,
+          "gaadikhoj/lost-vehicles/documents"
+        )
+      : null;
+
+    const firDocument = req.files?.firDocument?.[0]
+      ? await uploadToCloudinary(
+          req.files.firDocument[0].buffer,
+          "gaadikhoj/lost-vehicles/documents"
+        )
+      : null;
+
+    const aadharDocument = req.files?.aadharDocument?.[0]
+      ? await uploadToCloudinary(
+          req.files.aadharDocument[0].buffer,
+          "gaadikhoj/lost-vehicles/documents"
+        )
+      : null;
+
+    /* =========================
+       CREATE DOC
     ========================= */
     const lostVehicle = await LostVehicle.create({
       user: req.user._id,
@@ -92,12 +116,12 @@ exports.createLostVehicle = async (req, res) => {
 
       recoveryCharge: Number(recoveryCharge) || 0,
 
+      // ✅ Cloudinary URLs
       vehiclePhotos,
       rcDocument,
       firDocument,
       aadharDocument,
 
-      // 🔥 FORCE SAFE DEFAULTS
       status: "pending",
       approvedBy: null,
       approvedAt: null,

@@ -1,21 +1,44 @@
 const multer = require("multer");
-const path = require("path");
+const cloudinary = require("../config/cloudinary");
 
-const storage = multer.diskStorage({
-  destination(req, file, cb) {
-    cb(null, "uploads/");
-  },
-  filename(req, file, cb) {
-    cb(null, `${Date.now()}${path.extname(file.originalname)}`);
-  },
-});
+// memory storage (NO LOCAL FILE SAVE)
+const storage = multer.memoryStorage();
 
+// file filter
 const fileFilter = (req, file, cb) => {
-  const allowed = /jpg|jpeg|png/;
-  const ok =
-    allowed.test(path.extname(file.originalname).toLowerCase()) &&
-    allowed.test(file.mimetype);
-  cb(ok ? null : new Error("Images only"), ok);
+  const allowed = /jpg|jpeg|png|pdf/;
+  const isValid =
+    allowed.test(file.mimetype) ||
+    allowed.test(file.originalname.toLowerCase());
+
+  if (!isValid) {
+    return cb(new Error("Only images & pdf allowed"), false);
+  }
+
+  cb(null, true);
 };
 
-module.exports = multer({ storage, fileFilter });
+const upload = multer({ storage, fileFilter });
+
+// Upload helper (🔥 main magic)
+const uploadToCloudinary = (fileBuffer, folder) => {
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader
+      .upload_stream(
+        {
+          folder,
+          resource_type: "auto", // image + pdf support
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result.secure_url);
+        }
+      )
+      .end(fileBuffer);
+  });
+};
+
+module.exports = {
+  upload,
+  uploadToCloudinary,
+};

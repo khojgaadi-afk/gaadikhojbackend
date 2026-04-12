@@ -1,6 +1,4 @@
 const mongoose = require("mongoose");
-const fs = require("fs");
-const path = require("path");
 
 const Submission = require("../models/Submission");
 const Post = require("../models/Post");
@@ -8,6 +6,7 @@ const LostVehicle = require("../models/LostVehicle");
 const User = require("../models/User");
 const { creditReward } = require("../services/rewardService");
 const { sendNotification } = require("../utils/sendNotification");
+const { uploadToCloudinary } = require("../utils/upload"); // ✅ Cloudinary
 
 /* ===============================
    HELPERS
@@ -30,15 +29,19 @@ const getDistanceInKm = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
-const cleanupUploadedFile = (filename) => {
-  if (!filename) return;
+// ✅ Cloudinary se delete karo agar error aaye
+const cleanupCloudinaryFile = async (photoUrl) => {
+  if (!photoUrl) return;
   try {
-    const filePath = path.join(__dirname, "../../uploads", filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    const cloudinary = require("../config/cloudinary");
+    // URL se public_id nikalo
+    const parts = photoUrl.split("/");
+    const filename = parts[parts.length - 1].split(".")[0];
+    const folder = parts[parts.length - 2];
+    const publicId = `${folder}/${filename}`;
+    await cloudinary.uploader.destroy(publicId);
   } catch (err) {
-    console.error("❌ File cleanup error:", err.message);
+    console.error("❌ Cloudinary cleanup error:", err.message);
   }
 };
 
@@ -63,6 +66,7 @@ const safeEnd = (session) => {
 ================================ */
 const createSubmission = async (req, res) => {
   const session = await mongoose.startSession();
+  let uploadedPhotoUrl = null; // ✅ Track karo cleanup ke liye
 
   try {
     session.startTransaction();
@@ -80,7 +84,6 @@ const createSubmission = async (req, res) => {
     }
 
     if ((postId && vehicleId) || (!postId && !vehicleId)) {
-      cleanupUploadedFile(req.file.filename);
       await safeAbort(session);
       safeEnd(session);
       return res.status(400).json({
@@ -90,7 +93,6 @@ const createSubmission = async (req, res) => {
     }
 
     if (postId && !isValidObjectId(postId)) {
-      cleanupUploadedFile(req.file.filename);
       await safeAbort(session);
       safeEnd(session);
       return res.status(400).json({
@@ -100,7 +102,6 @@ const createSubmission = async (req, res) => {
     }
 
     if (vehicleId && !isValidObjectId(vehicleId)) {
-      cleanupUploadedFile(req.file.filename);
       await safeAbort(session);
       safeEnd(session);
       return res.status(400).json({
@@ -120,7 +121,6 @@ const createSubmission = async (req, res) => {
       lngNum < -180 ||
       lngNum > 180
     ) {
-      cleanupUploadedFile(req.file.filename);
       await safeAbort(session);
       safeEnd(session);
       return res.status(400).json({
@@ -129,10 +129,25 @@ const createSubmission = async (req, res) => {
       });
     }
 
+    // ✅ Cloudinary pe upload karo PEHLE
+    uploadedPhotoUrl = await uploadToCloudinary(
+      req.file.buffer,
+      "gaadikhoj/submissions"
+    );
+
+    if (!uploadedPhotoUrl) {
+      await safeAbort(session);
+      safeEnd(session);
+      return res.status(500).json({
+        success: false,
+        message: "Photo upload failed",
+      });
+    }
+
     const user = await User.findById(userId).session(session);
 
     if (!user) {
-      cleanupUploadedFile(req.file.filename);
+      await cleanupCloudinaryFile(uploadedPhotoUrl);
       await safeAbort(session);
       safeEnd(session);
       return res.status(404).json({
@@ -142,7 +157,7 @@ const createSubmission = async (req, res) => {
     }
 
     if (user.isSuspicious) {
-      cleanupUploadedFile(req.file.filename);
+      await cleanupCloudinaryFile(uploadedPhotoUrl);
       await safeAbort(session);
       safeEnd(session);
       return res.status(403).json({
@@ -152,7 +167,7 @@ const createSubmission = async (req, res) => {
     }
 
     if (typeof user.trustScore === "number" && user.trustScore < 1) {
-      cleanupUploadedFile(req.file.filename);
+      await cleanupCloudinaryFile(uploadedPhotoUrl);
       await safeAbort(session);
       safeEnd(session);
       return res.status(403).json({
@@ -175,8 +190,7 @@ const createSubmission = async (req, res) => {
       }
 
       await user.save({ session });
-
-      cleanupUploadedFile(req.file.filename);
+      await cleanupCloudinaryFile(uploadedPhotoUrl);
       await session.commitTransaction();
       safeEnd(session);
 
@@ -186,11 +200,10 @@ const createSubmission = async (req, res) => {
       });
     }
 
-    const photoPath = `/uploads/${req.file.filename}`;
-
+    // ✅ Cloudinary URL save karo
     const submissionData = {
       user: user._id,
-      photoUrl: photoPath,
+      photoUrl: uploadedPhotoUrl,
       notes: typeof notes === "string" ? notes.trim().slice(0, 500) : "",
       lat: latNum,
       lng: lngNum,
@@ -204,11 +217,11 @@ const createSubmission = async (req, res) => {
       const post = await Post.findOneAndUpdate(
         { _id: postId, status: "active" },
         { $set: { status: "pending" } },
-        { new: true, session },
+        { new: true, session }
       );
 
       if (!post) {
-        cleanupUploadedFile(req.file.filename);
+        await cleanupCloudinaryFile(uploadedPhotoUrl);
         await safeAbort(session);
         safeEnd(session);
         return res.status(400).json({
@@ -226,7 +239,7 @@ const createSubmission = async (req, res) => {
         post.status = "active";
         await post.save({ session });
 
-        cleanupUploadedFile(req.file.filename);
+        await cleanupCloudinaryFile(uploadedPhotoUrl);
         await safeAbort(session);
         safeEnd(session);
         return res.status(400).json({
@@ -253,7 +266,7 @@ const createSubmission = async (req, res) => {
           post.status = "active";
           await post.save({ session });
 
-          cleanupUploadedFile(req.file.filename);
+          await cleanupCloudinaryFile(uploadedPhotoUrl);
           await safeAbort(session);
           safeEnd(session);
           return res.status(400).json({
@@ -275,7 +288,7 @@ const createSubmission = async (req, res) => {
       const vehicle = await LostVehicle.findById(vehicleId).session(session);
 
       if (!vehicle) {
-        cleanupUploadedFile(req.file.filename);
+        await cleanupCloudinaryFile(uploadedPhotoUrl);
         await safeAbort(session);
         safeEnd(session);
         return res.status(404).json({
@@ -290,7 +303,7 @@ const createSubmission = async (req, res) => {
       }).session(session);
 
       if (existingUserSubmission) {
-        cleanupUploadedFile(req.file.filename);
+        await cleanupCloudinaryFile(uploadedPhotoUrl);
         await safeAbort(session);
         safeEnd(session);
         return res.status(400).json({
@@ -305,7 +318,7 @@ const createSubmission = async (req, res) => {
       }).session(session);
 
       if (alreadyTaken) {
-        cleanupUploadedFile(req.file.filename);
+        await cleanupCloudinaryFile(uploadedPhotoUrl);
         await safeAbort(session);
         safeEnd(session);
         return res.status(400).json({
@@ -328,7 +341,7 @@ const createSubmission = async (req, res) => {
       submission,
     });
   } catch (err) {
-    cleanupUploadedFile(req.file?.filename);
+    await cleanupCloudinaryFile(uploadedPhotoUrl);
     await safeAbort(session);
     safeEnd(session);
 
@@ -351,11 +364,11 @@ const getUserSubmissions = async (req, res) => {
     })
       .populate(
         "post",
-        "carNumber city area rewardAmount photoUrl status location",
+        "carNumber city area rewardAmount photoUrl status location"
       )
       .populate(
         "vehicle",
-        "vehicleNumber city area vehiclePhotos location vehicleType",
+        "vehicleNumber city area vehiclePhotos location vehicleType"
       )
       .sort({ createdAt: -1 });
 
@@ -441,7 +454,7 @@ const verifySubmission = async (req, res) => {
 
     if (total >= 10) {
       user.trustScore = Number(
-        ((user.approvedSubmissions / total) * 5).toFixed(2),
+        ((user.approvedSubmissions / total) * 5).toFixed(2)
       );
     }
 
@@ -470,8 +483,6 @@ const verifySubmission = async (req, res) => {
       await submission.save({ session });
       await user.save({ session });
 
-      // ✅ IMPORTANT FIX:
-      // reward ko same transaction flow me hi credit karo
       if (rewardAmount > 0) {
         await creditReward({
           userId: submission.user,
@@ -490,7 +501,7 @@ const verifySubmission = async (req, res) => {
           await sendNotification(
             user.pushToken,
             "💰 Reward Approved",
-            `You earned ₹${rewardAmount} for completing the task`,
+            `You earned ₹${rewardAmount} for completing the task`
           );
         }
       } catch (notifyErr) {
@@ -519,7 +530,7 @@ const verifySubmission = async (req, res) => {
           await sendNotification(
             user.pushToken,
             "✅ Submission Approved",
-            "Your lost vehicle proof has been approved",
+            "Your lost vehicle proof has been approved"
           );
         }
       } catch (notifyErr) {
@@ -557,7 +568,7 @@ const verifySubmission = async (req, res) => {
           await sendNotification(
             user.pushToken,
             "❌ Submission Rejected",
-            "Your submission was rejected by admin",
+            "Your submission was rejected by admin"
           );
         }
       } catch (notifyErr) {
@@ -599,11 +610,11 @@ const getPendingSubmissions = async (req, res) => {
     const submissions = await Submission.find({ status: "pending" })
       .populate(
         "post",
-        "carNumber city area rewardAmount photoUrl status location",
+        "carNumber city area rewardAmount photoUrl status location"
       )
       .populate(
         "vehicle",
-        "vehicleNumber city area vehiclePhotos location vehicleType",
+        "vehicleNumber city area vehiclePhotos location vehicleType"
       )
       .populate("user", "email name")
       .sort({ createdAt: -1 });
@@ -636,11 +647,11 @@ const getSubmissionById = async (req, res) => {
     const submission = await Submission.findById(req.params.id)
       .populate(
         "post",
-        "carNumber city area rewardAmount photoUrl status location",
+        "carNumber city area rewardAmount photoUrl status location"
       )
       .populate(
         "vehicle",
-        "vehicleNumber city area vehiclePhotos location vehicleType",
+        "vehicleNumber city area vehiclePhotos location vehicleType"
       )
       .populate("user", "email name");
 
@@ -683,11 +694,11 @@ const getAllSubmissions = async (req, res) => {
     const submissions = await Submission.find(query)
       .populate(
         "post",
-        "carNumber city area rewardAmount photoUrl status location",
+        "carNumber city area rewardAmount photoUrl status location"
       )
       .populate(
         "vehicle",
-        "vehicleNumber city area vehiclePhotos location vehicleType",
+        "vehicleNumber city area vehiclePhotos location vehicleType"
       )
       .populate("user", "email name")
       .sort({ createdAt: -1 });

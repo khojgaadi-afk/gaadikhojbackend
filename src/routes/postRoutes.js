@@ -11,7 +11,7 @@ const {
 const { adminProtect: protectAdmin } = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/permissionMiddleware");
 
-const upload = require("../utils/upload");
+const { upload } = require("../utils/upload");
 
 /* =========================
    ADMIN CREATE POST

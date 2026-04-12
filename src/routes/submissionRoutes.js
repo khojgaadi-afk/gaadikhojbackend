@@ -4,7 +4,7 @@ const router = express.Router();
 /* =========================
    MIDDLEWARE
 ========================= */
-const upload = require("../utils/upload");
+const { upload } = require("../utils/upload");
 
 const {
   createSubmission,
