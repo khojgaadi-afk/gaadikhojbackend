@@ -1,6 +1,7 @@
 const Post = require("../models/Post");
 const User = require("../models/User");
 const { sendNotification } = require("../utils/sendNotification");
+const { uploadToCloudinary } = require("../utils/upload"); // ✅ Cloudinary
 
 /* =========================
    CREATE NEW POST (ADMIN)
@@ -27,6 +28,12 @@ exports.createPost = async (req, res) => {
       });
     }
 
+    // ✅ Cloudinary upload
+    let photoUrl = null;
+    if (req.file?.buffer) {
+      photoUrl = await uploadToCloudinary(req.file.buffer, "gaadikhoj/posts");
+    }
+
     const post = await Post.create({
       carNumber: carNumber.trim().toUpperCase(),
       city: city.trim(),
@@ -36,10 +43,8 @@ exports.createPost = async (req, res) => {
         lat: isNaN(latNum) ? null : latNum,
         lng: isNaN(lngNum) ? null : lngNum,
       },
-      photoUrl: req.file ? `/uploads/${req.file.filename}` : null,
+      photoUrl,
       createdBy: req.admin?._id || req.user?._id || null,
-
-      // ✅ CORRECT STATUS
       status: "active",
     });
 
@@ -94,6 +99,7 @@ exports.getActivePosts = async (req, res) => {
     });
   }
 };
+
 /* =========================
    UPDATE POST
 ========================= */
@@ -113,6 +119,7 @@ exports.updatePost = async (req, res) => {
     if (carNumber !== undefined) post.carNumber = carNumber.trim().toUpperCase();
     if (city !== undefined) post.city = city.trim();
     if (area !== undefined) post.area = area.trim();
+
     if (rewardAmount !== undefined) {
       const rewardNum = Number(rewardAmount);
       if (isNaN(rewardNum) || rewardNum <= 0) {
@@ -124,8 +131,11 @@ exports.updatePost = async (req, res) => {
       post.rewardAmount = rewardNum;
     }
 
-    if (status !== undefined) {
-      post.status = status;
+    if (status !== undefined) post.status = status;
+
+    // ✅ Update pe bhi Cloudinary upload
+    if (req.file?.buffer) {
+      post.photoUrl = await uploadToCloudinary(req.file.buffer, "gaadikhoj/posts");
     }
 
     await post.save();
