@@ -71,6 +71,9 @@ const createSubmission = async (req, res) => {
   try {
     session.startTransaction();
 
+    console.log("File received:", req.file);
+console.log("File buffer:", req.file?.buffer?.length);
+
     const { postId, vehicleId, lat, lng, notes } = req.body;
     const userId = req.user._id || req.user.id;
 
