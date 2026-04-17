@@ -79,6 +79,35 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
+    /* ==========================
+       WITHDRAWAL SECURITY
+    ========================== */
+
+    phone: {
+      type: String,
+      default: null,
+    },
+
+    isPhoneAdded: {
+      type: Boolean,
+      default: false,
+    },
+
+    withdrawalPin: {
+      type: String,
+      select: false,
+    },
+
+    pinAttempts: {
+      type: Number,
+      default: 0,
+    },
+
+    pinLockUntil: {
+      type: Date,
+      default: null,
+    },
+
     /* LOGIN SECURITY */
     loginAttempts: {
       type: Number,
@@ -114,7 +143,7 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
 
-    /* EMAIL OTP (REGISTRATION) */
+    /* EMAIL OTP */
     emailOTP: {
       type: String,
       default: null,
@@ -174,24 +203,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
-    /* EGG BATCH SYSTEM */
-    firstBatchWatched: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    secondBatchWatched: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-
-    secondBatchUnlockAt: {
-      type: Date,
-      default: null,
-    },
-
     /* STREAK SYSTEM */
     streakCount: {
       type: Number,
@@ -213,14 +224,66 @@ const userSchema = new mongoose.Schema(
    HASH PASSWORD
 ========================== */
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+  if (this.isModified("password")) {
+    const salt = await bcrypt.genSalt(12);
+    this.password = await bcrypt.hash(this.password, salt);
+    this.passwordChangedAt = Date.now() - 1000;
+  }
 
-  const salt = await bcrypt.genSalt(12);
-  this.password = await bcrypt.hash(this.password, salt);
-
-  this.passwordChangedAt = Date.now() - 1000;
   next();
 });
+
+/* ==========================
+   HASH WITHDRAWAL PIN
+========================== */
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("withdrawalPin")) return next();
+
+  const salt = await bcrypt.genSalt(10);
+  this.withdrawalPin = await bcrypt.hash(this.withdrawalPin, salt);
+
+  next();
+});
+
+/* ==========================
+   MATCH PASSWORD
+========================== */
+userSchema.methods.matchPassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+/* ==========================
+   MATCH PIN
+========================== */
+userSchema.methods.matchPin = async function (enteredPin) {
+  return await bcrypt.compare(enteredPin, this.withdrawalPin);
+};
+
+/* ==========================
+   HANDLE PIN ATTEMPTS
+========================== */
+userSchema.methods.handlePinAttempt = async function (isMatch) {
+  if (this.pinLockUntil && this.pinLockUntil > Date.now()) {
+    return { success: false, message: "Too many attempts. Try after 30 mins" };
+  }
+
+  if (isMatch) {
+    this.pinAttempts = 0;
+    this.pinLockUntil = null;
+    await this.save();
+    return { success: true };
+  }
+
+  this.pinAttempts += 1;
+
+  if (this.pinAttempts >= 3) {
+    this.pinLockUntil = Date.now() + 30 * 60 * 1000;
+  }
+
+  await this.save();
+
+  return { success: false, message: "Invalid PIN" };
+};
 
 /* ==========================
    GENERATE REFERRAL CODE
@@ -238,9 +301,7 @@ userSchema.pre("save", async function (next) {
 
     code = namePart + Math.floor(1000 + Math.random() * 9000);
 
-    const user = await mongoose.models.User.findOne({
-      referralCode: code,
-    });
+    const user = await mongoose.models.User.findOne({ referralCode: code });
 
     if (!user) exists = false;
   }
@@ -248,13 +309,6 @@ userSchema.pre("save", async function (next) {
   this.referralCode = code;
   next();
 });
-
-/* ==========================
-   COMPARE PASSWORD
-========================== */
-userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
 
 /* ==========================
    LOGIN HANDLER
@@ -280,23 +334,6 @@ userSchema.methods.handleLogin = async function (isMatch) {
   await this.save();
 
   return { success: false, message: "Invalid credentials" };
-};
-
-/* ==========================
-   OTP GENERATION
-========================== */
-userSchema.methods.setOTP = function (otp) {
-  this.resetOTP = crypto.createHash("sha256").update(otp).digest("hex");
-  this.otpExpire = Date.now() + 10 * 60 * 1000;
-};
-
-/* ==========================
-   VERIFY OTP
-========================== */
-userSchema.methods.verifyOTP = function (enteredOTP) {
-  const hashed = crypto.createHash("sha256").update(enteredOTP).digest("hex");
-
-  return this.resetOTP === hashed && this.otpExpire > Date.now();
 };
 
 /* ==========================

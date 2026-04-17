@@ -1,8 +1,10 @@
 const mongoose = require("mongoose");
 const Withdrawal = require("../models/Withdrawal");
 const Wallet = require("../models/Wallet");
+const User = require("../models/User");
 const logAudit = require("../utils/auditLogger");
 const { sendPayout } = require("../services/payoutService");
+
 
 /* ==============================
    HELPERS
@@ -43,9 +45,10 @@ const isValidAccountNumber = (acc) => {
 ============================== */
 const createWithdrawal = async (req, res) => {
   const session = await mongoose.startSession();
+  session.startTransaction();
 
   try {
-    session.startTransaction();
+   
 
     if (!req.user || !req.user._id) {
       await safeAbort(session);
@@ -55,6 +58,42 @@ const createWithdrawal = async (req, res) => {
         message: "User not logged in",
       });
     }
+
+/* 🔐 PHONE + PIN CHECK */
+const user = await User.findById(req.user._id).select("+withdrawalPin");
+
+if (!user.phone || !user.withdrawalPin) {
+  await safeAbort(session);
+  safeEnd(session);
+  return res.status(400).json({
+    success: false,
+    message: "Please complete profile setup (phone + PIN)",
+  });
+}
+
+/* 🔐 PIN VERIFY */
+const { pin } = req.body;
+
+if (!pin) {
+  await safeAbort(session);
+  safeEnd(session);
+  return res.status(400).json({
+    success: false,
+    message: "Withdrawal PIN required",
+  });
+}
+
+const isMatch = await user.matchPin(pin);
+const result = await user.handlePinAttempt(isMatch);
+
+if (!result.success) {
+  await safeAbort(session);
+  safeEnd(session);
+  return res.status(400).json({
+    success: false,
+    message: result.message,
+  });
+}
 
     const { amount, upiId, accountNumber, ifsc, name } = req.body;
     const amountNum = normalizeAmount(amount);
@@ -144,7 +183,7 @@ const createWithdrawal = async (req, res) => {
       {
         new: true,
         session,
-      }
+      },
     );
 
     if (!wallet) {
@@ -168,7 +207,7 @@ const createWithdrawal = async (req, res) => {
           status: "pending",
         },
       ],
-      { session }
+      { session },
     );
 
     /* Push wallet transaction */
@@ -187,7 +226,7 @@ const createWithdrawal = async (req, res) => {
           },
         },
       },
-      { session }
+      { session },
     );
 
     await session.commitTransaction();
@@ -209,6 +248,9 @@ const createWithdrawal = async (req, res) => {
     });
   }
 };
+
+
+
 
 /* ==============================
    ADMIN GET ALL WITHDRAWALS
@@ -285,7 +327,7 @@ const processWithdrawal = async (req, res) => {
           adminNote: adminNote || null,
         },
       },
-      { new: true, session }
+      { new: true, session },
     );
 
     if (!withdrawal) {
@@ -331,7 +373,7 @@ const processWithdrawal = async (req, res) => {
           {
             new: true,
             session: refundSession,
-          }
+          },
         );
 
         if (!refundWallet) {
@@ -348,7 +390,7 @@ const processWithdrawal = async (req, res) => {
               processedAt: new Date(),
             },
           },
-          { session: refundSession }
+          { session: refundSession },
         );
 
         if (req.admin?._id) {
@@ -387,7 +429,8 @@ const processWithdrawal = async (req, res) => {
 
         return res.status(500).json({
           success: false,
-          message: "Refund failed. Withdrawal reset to pending for manual review.",
+          message:
+            "Refund failed. Withdrawal reset to pending for manual review.",
         });
       }
     }
@@ -474,7 +517,7 @@ const processWithdrawal = async (req, res) => {
           {
             new: true,
             session: refundSession,
-          }
+          },
         );
 
         if (!refundWallet) {
@@ -491,7 +534,7 @@ const processWithdrawal = async (req, res) => {
               processedAt: new Date(),
             },
           },
-          { session: refundSession }
+          { session: refundSession },
         );
 
         if (req.admin?._id) {
@@ -524,13 +567,15 @@ const processWithdrawal = async (req, res) => {
         await Withdrawal.findByIdAndUpdate(withdrawal._id, {
           $set: {
             status: "pending",
-            adminNote: "Payout/refund failed. Reset to pending for manual review.",
+            adminNote:
+              "Payout/refund failed. Reset to pending for manual review.",
           },
         });
 
         return res.status(500).json({
           success: false,
-          message: "Payout failed and refund also failed. Withdrawal reset to pending for manual review.",
+          message:
+            "Payout failed and refund also failed. Withdrawal reset to pending for manual review.",
         });
       }
     }
