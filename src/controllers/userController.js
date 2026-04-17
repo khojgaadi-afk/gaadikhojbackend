@@ -263,9 +263,9 @@ exports.getLeaderboard = async (req, res) => {
 ========================= */
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, phone, pin } = req.body;
 
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).select("+withdrawalPin");
 
     if (!user) {
       return res.status(404).json({
@@ -273,6 +273,9 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
+    /* =========================
+       EMAIL CHECK
+    ========================= */
     if (email && email !== user.email) {
       const existing = await User.findOne({ email });
       if (existing) {
@@ -282,8 +285,38 @@ exports.updateProfile = async (req, res) => {
       }
     }
 
+    /* =========================
+       UPDATE BASIC INFO
+    ========================= */
     user.name = name || user.name;
     user.email = email || user.email;
+
+    /* =========================
+       PHONE UPDATE
+    ========================= */
+    if (phone) {
+      user.phone = phone;
+      user.isPhoneAdded = true;
+    }
+
+    /* =========================
+       PIN UPDATE (SECURE 🔐)
+    ========================= */
+    if (pin) {
+      if (pin.length !== 4) {
+        return res.status(400).json({
+          message: "PIN must be 4 digits",
+        });
+      }
+
+      if (["0000", "1234", "1111"].includes(pin)) {
+        return res.status(400).json({
+          message: "Weak PIN not allowed",
+        });
+      }
+
+      user.withdrawalPin = pin; // hashing automatically via schema
+    }
 
     await user.save();
 
@@ -294,6 +327,8 @@ exports.updateProfile = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
+        isPhoneAdded: user.isPhoneAdded,
       },
     });
   } catch (err) {
